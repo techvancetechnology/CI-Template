@@ -1,0 +1,90 @@
+name: Reusable .NET + React Deploy
+
+on:
+  workflow_call:
+    inputs:
+      remote_root_path:
+        required: true
+        type: string
+      service_name:
+        required: true
+        type: string
+      backend_path:
+        required: false
+        default: "backend"
+        type: string
+      frontend_path:
+        required: false
+        default: "frontend"
+        type: string
+    secrets:
+      VDS_HOST:
+        required: true
+      VDS_SSH_KEY:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      REMOTE_ROOT: ${{ inputs.remote_root_path }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: 9.0.x
+
+    - name: Setup Node
+      uses: actions/setup-node@v3
+      with:
+        node-version: 20
+
+    - name: Build Backend
+      run: |
+        cd ${{ inputs.backend_path }}
+        dotnet restore
+        dotnet publish -c Release -o ../publish/api
+
+    - name: Build Frontend
+      run: |
+        cd ${{ inputs.frontend_path }}
+        cat .env.production
+        npm install
+        npm run build
+        mkdir -p ../publish/app
+        cp -r dist/* ../publish/app/
+
+    - name: Setup SSH
+      run: |
+        echo "${{ secrets.VDS_SSH_KEY }}" > id_rsa
+        chmod 600 id_rsa
+
+    - name: Clean Remote API Folder
+      run: |
+        ssh -i id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VDS_HOST }} \
+        "find $REMOTE_ROOT/api -mindepth 1 -maxdepth 1 \
+            ! -name 'uploads' \
+            ! -name 'app.db*' \
+            -exec rm -rf {} \;"
+
+    - name: Upload Backend
+      run: |
+        scp -i id_rsa -o StrictHostKeyChecking=no -r publish/api/* \
+        root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/api/
+
+    - name: Upload Frontend
+      run: |
+        ssh -i id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VDS_HOST }} \
+          "rm -rf $REMOTE_ROOT/app/*"
+        scp -i id_rsa -o StrictHostKeyChecking=no -r publish/app/* \
+        root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/app/
+
+    - name: Restart API Service
+      run: |
+        ssh -i id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VDS_HOST }} \
+        "systemctl restart ${{ inputs.service_name }}"
