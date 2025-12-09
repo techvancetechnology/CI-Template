@@ -24,7 +24,7 @@ on:
       protected_folders:
         required: false
         type: string
-        default: ""   # Örn: "uploads,localization,images"
+        default: ""
 
     secrets:
       VDS_HOST:
@@ -53,60 +53,75 @@ jobs:
       with:
         node-version: 20
 
+    # ---------------------------
+    # BUILD BACKEND
+    # ---------------------------
     - name: Build Backend
       run: |
         cd ${{ inputs.backend_path }}
         dotnet restore
-        dotnet publish -c Release -o ../publish/api
+        dotnet publish -c Release -o ../publish/backend
 
+    # ---------------------------
+    # BUILD FRONTEND
+    # ---------------------------
     - name: Build Frontend
       run: |
         cd ${{ inputs.frontend_path }}
         npm install
         npm run build
-        mkdir -p ../publish/app
-        cp -r dist/* ../publish/app/
+        mkdir -p ../publish/frontend
+        cp -r dist/* ../publish/frontend/
 
+    # ---------------------------
+    # SSH KEY
+    # ---------------------------
     - name: Setup SSH Key
       run: |
         echo "${{ secrets.VDS_SSH_KEY }}" > id_rsa
         chmod 600 id_rsa
 
-    - name: Clean Remote API Folder (Dynamic Protected Folders)
+    # ---------------------------
+    # CLEAN REMOTE BACKEND
+    # ---------------------------
+    - name: Clean Remote Backend Folder
       run: |
         PROTECT="${{ inputs.protected_folders }}"
         echo "Protected folders: $PROTECT"
 
-        # Komut oluştur
         CONDITION=""
-        IFS=',' read -ra ARR <<< "$PROTECT"
+        IFS=$'\n' read -d '' -r -a ARR <<< "$PROTECT"
         for F in "${ARR[@]}"; do
           F_TRIM=$(echo "$F" | xargs)
-          [ -n "$F_TRIM" ] && CONDITION="$CONDITION ! -name '$F_TRIM' "
+          [ -n "$F_TRIM" ] && CONDITION="$CONDITION ! -path \"$REMOTE_ROOT/$F_TRIM\" "
         done
 
-        echo "Final condition: $CONDITION"
-
         ssh -i id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VDS_HOST }} \
-          "find $REMOTE_ROOT/api -mindepth 1 -maxdepth 1 \
-            ! -name 'app.db' \
-            ! -name 'app.db-wal' \
-            ! -name 'app.db-shm' \
+          "find $REMOTE_ROOT/backend -mindepth 1 -maxdepth 1 \
             $CONDITION \
             -exec rm -rf {} \;"
 
+    # ---------------------------
+    # UPLOAD BACKEND
+    # ---------------------------
     - name: Upload Backend
       run: |
-        scp -i id_rsa -o StrictHostKeyChecking=no -r publish/api/* \
-        root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/api/
+        scp -i id_rsa -o StrictHostKeyChecking=no -r publish/backend/* \
+        root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/
 
+    # ---------------------------
+    # UPLOAD FRONTEND
+    # ---------------------------
     - name: Upload Frontend
       run: |
         ssh -i id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VDS_HOST }} \
-          "rm -rf $REMOTE_ROOT/app/*"
-        scp -i id_rsa -o StrictHostKeyChecking=no -r publish/app/* \
-        root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/app/
+          "rm -rf $REMOTE_ROOT/frontend/*"
+        scp -i id_rsa -o StrictHostKeyChecking=no -r publish/frontend/* \
+        root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
 
+    # ---------------------------
+    # RESTART API SERVICE
+    # ---------------------------
     - name: Restart API Service
       run: |
         ssh -i id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VDS_HOST }} \
