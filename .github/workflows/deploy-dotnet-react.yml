@@ -21,11 +21,6 @@ on:
         type: string
         default: "frontend"
 
-      protected_folders:
-        required: false
-        type: string
-        default: ""
-
     secrets:
       VDS_HOST:
         required: true
@@ -40,14 +35,23 @@ jobs:
       REMOTE_ROOT: ${{ inputs.remote_root_path }}
 
     steps:
+    # ---------------------------
+    # CHECKOUT
+    # ---------------------------
     - name: Checkout
       uses: actions/checkout@v3
 
+    # ---------------------------
+    # SETUP .NET
+    # ---------------------------
     - name: Setup .NET
       uses: actions/setup-dotnet@v3
       with:
         dotnet-version: 9.0.x
 
+    # ---------------------------
+    # SETUP NODE
+    # ---------------------------
     - name: Setup Node
       uses: actions/setup-node@v3
       with:
@@ -86,20 +90,16 @@ jobs:
     # ---------------------------
     - name: Clean Remote Backend Folder
       run: |
-        PROTECT="${{ inputs.protected_folders }}"
-        echo "Protected folders: $PROTECT"
-
-        CONDITION=""
-        IFS=$'\n' read -d '' -r -a ARR <<< "$PROTECT"
-        for F in "${ARR[@]}"; do
-          F_TRIM=$(echo "$F" | xargs)
-          [ -n "$F_TRIM" ] && CONDITION="$CONDITION ! -path \"$REMOTE_ROOT/$F_TRIM\" "
-        done
-
         ssh -i id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VDS_HOST }} \
-          "find $REMOTE_ROOT/backend -mindepth 1 -maxdepth 1 \
-            $CONDITION \
-            -exec rm -rf {} \;"
+          "rm -rf $REMOTE_ROOT/backend/*"
+
+    # ---------------------------
+    # CLEAN REMOTE FRONTEND
+    # ---------------------------
+    - name: Clean Remote Frontend Folder
+      run: |
+        ssh -i id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VDS_HOST }} \
+          "rm -rf $REMOTE_ROOT/frontend/*"
 
     # ---------------------------
     # UPLOAD BACKEND
@@ -114,8 +114,6 @@ jobs:
     # ---------------------------
     - name: Upload Frontend
       run: |
-        ssh -i id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VDS_HOST }} \
-          "rm -rf $REMOTE_ROOT/frontend/*"
         scp -i id_rsa -o StrictHostKeyChecking=no -r publish/frontend/* \
         root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
 
