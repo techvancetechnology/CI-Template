@@ -1,4 +1,4 @@
-name: Reusable .NET + React Deploy
+name: Reusable .NET + React Deploy (rsync)
 
 on:
   workflow_call:
@@ -35,23 +35,14 @@ jobs:
       REMOTE_ROOT: ${{ inputs.remote_root_path }}
 
     steps:
-    # ---------------------------
-    # CHECKOUT
-    # ---------------------------
     - name: Checkout
       uses: actions/checkout@v3
 
-    # ---------------------------
-    # SETUP .NET
-    # ---------------------------
     - name: Setup .NET
       uses: actions/setup-dotnet@v3
       with:
         dotnet-version: 9.0.x
 
-    # ---------------------------
-    # SETUP NODE
-    # ---------------------------
     - name: Setup Node
       uses: actions/setup-node@v3
       with:
@@ -86,36 +77,24 @@ jobs:
         chmod 600 id_rsa
 
     # ---------------------------
-    # CLEAN REMOTE BACKEND
+    # RSYNC BACKEND
     # ---------------------------
-    - name: Clean Remote Backend Folder
+    - name: Upload Backend via rsync
       run: |
-        ssh -i id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VDS_HOST }} \
-          "rm -rf $REMOTE_ROOT/backend/*"
+        rsync -avz --delete \
+          -e "ssh -i id_rsa -o StrictHostKeyChecking=no" \
+          publish/backend/ \
+          root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/
 
     # ---------------------------
-    # CLEAN REMOTE FRONTEND
+    # RSYNC FRONTEND
     # ---------------------------
-    - name: Clean Remote Frontend Folder
+    - name: Upload Frontend via rsync
       run: |
-        ssh -i id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VDS_HOST }} \
-          "rm -rf $REMOTE_ROOT/frontend/*"
-
-    # ---------------------------
-    # UPLOAD BACKEND
-    # ---------------------------
-    - name: Upload Backend
-      run: |
-        scp -i id_rsa -o StrictHostKeyChecking=no -r publish/backend/* \
-        root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/
-
-    # ---------------------------
-    # UPLOAD FRONTEND
-    # ---------------------------
-    - name: Upload Frontend
-      run: |
-        scp -i id_rsa -o StrictHostKeyChecking=no -r publish/frontend/* \
-        root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
+        rsync -avz --delete \
+          -e "ssh -i id_rsa -o StrictHostKeyChecking=no" \
+          publish/frontend/ \
+          root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
 
     # ---------------------------
     # RESTART API SERVICE
