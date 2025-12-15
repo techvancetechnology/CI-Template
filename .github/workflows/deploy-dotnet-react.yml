@@ -55,7 +55,7 @@ jobs:
       run: |
         cd ${{ inputs.backend_path }}
         dotnet restore
-        dotnet publish -c Release -o ../publish/backend
+        dotnet publish -c Release -o $GITHUB_WORKSPACE/publish/backend
 
     # ---------------------------
     # BUILD FRONTEND
