@@ -1,4 +1,4 @@
-name: Sync STAGING to PROD
+name: Sync Staging to Prod
 
 on:
   workflow_call:
@@ -6,15 +6,12 @@ on:
       staging_root_path:
         required: true
         type: string
-
       prod_root_path:
         required: true
         type: string
-
       prod_service_name:
         required: true
         type: string
-
     secrets:
       VDS_HOST:
         required: true
@@ -24,28 +21,31 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-
     steps:
       - name: Setup SSH
         run: |
-          echo "${{ secrets.VDS_SSH_KEY }}" > id_rsa
-          chmod 600 id_rsa
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.VDS_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Sync backend
+      - name: Sync backend (STAGING → PROD)
         run: |
-          rsync -avz --delete \
-            -e "ssh -i id_rsa -o StrictHostKeyChecking=no" \
-            root@${{ secrets.VDS_HOST }}:${{ inputs.staging_root_path }}/backend/ \
-            root@${{ secrets.VDS_HOST }}:${{ inputs.prod_root_path }}/backend/
+          ssh root@${{ secrets.VDS_HOST }} "
+            rsync -av --delete \
+              ${{ inputs.staging_root_path }}/backend/ \
+              ${{ inputs.prod_root_path }}/backend/
+          "
 
-      - name: Sync frontend
+      - name: Sync frontend (STAGING → PROD)
         run: |
-          rsync -avz --delete \
-            -e "ssh -i id_rsa -o StrictHostKeyChecking=no" \
-            root@${{ secrets.VDS_HOST }}:${{ inputs.staging_root_path }}/frontend/ \
-            root@${{ secrets.VDS_HOST }}:${{ inputs.prod_root_path }}/frontend/
+          ssh root@${{ secrets.VDS_HOST }} "
+            rsync -av --delete \
+              ${{ inputs.staging_root_path }}/frontend/ \
+              ${{ inputs.prod_root_path }}/frontend/
+          "
 
       - name: Restart PROD service
         run: |
-          ssh -i id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VDS_HOST }} \
-            "systemctl restart ${{ inputs.prod_service_name }}"
+          ssh root@${{ secrets.VDS_HOST }} \
+            'systemctl restart ${{ inputs.prod_service_name }}'
