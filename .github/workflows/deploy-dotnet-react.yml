@@ -14,12 +14,12 @@ on:
       backend_path:
         required: false
         type: string
-        default: "backend"
+        default: backend
 
       frontend_path:
         required: false
         type: string
-        default: "frontend"
+        default: frontend
 
     secrets:
       VDS_HOST:
@@ -35,71 +35,55 @@ jobs:
       REMOTE_ROOT: ${{ inputs.remote_root_path }}
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v3
 
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v3
-      with:
-        dotnet-version: 9.0.x
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 9.0.x
 
-    - name: Setup Node
-      uses: actions/setup-node@v3
-      with:
-        node-version: 20
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ${{ inputs.frontend_path }}/package-lock.json
 
-    # ---------------------------
-    # BUILD BACKEND
-    # ---------------------------
-    - name: Build Backend
-      run: |
-        cd ${{ inputs.backend_path }}
-        dotnet restore
-        dotnet publish -c Release -o $GITHUB_WORKSPACE/publish/backend
+      - name: Build Backend
+        run: |
+          cd ${{ inputs.backend_path }}
+          dotnet restore
+          dotnet publish -c Release -o $GITHUB_WORKSPACE/publish/backend
 
-    # ---------------------------
-    # BUILD FRONTEND
-    # ---------------------------
-    - name: Build Frontend
-      run: |
-        cd ${{ inputs.frontend_path }}
-        npm install
-        npm run build
-        mkdir -p ../publish/frontend
-        cp -r dist/* ../publish/frontend/
+      - name: Build Frontend
+        run: |
+          cd ${{ inputs.frontend_path }}
+          npm install
+          npm run build
+          mkdir -p ../publish/frontend
+          cp -r dist/* ../publish/frontend/
 
-    # ---------------------------
-    # SSH KEY
-    # ---------------------------
-    - name: Setup SSH Key
-      run: |
-        echo "${{ secrets.VDS_SSH_KEY }}" > id_rsa
-        chmod 600 id_rsa
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.VDS_HOST }} >> ~/.ssh/known_hosts
 
-    # ---------------------------
-    # RSYNC BACKEND
-    # ---------------------------
-    - name: Upload Backend via rsync
-      run: |
-        rsync -avz --delete \
-          -e "ssh -i id_rsa -o StrictHostKeyChecking=no" \
-          publish/backend/ \
-          root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/
+      - name: Upload Backend
+        run: |
+          rsync -avz --delete \
+            publish/backend/ \
+            root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/
 
-    # ---------------------------
-    # RSYNC FRONTEND
-    # ---------------------------
-    - name: Upload Frontend via rsync
-      run: |
-        rsync -avz --delete \
-          -e "ssh -i id_rsa -o StrictHostKeyChecking=no" \
-          publish/frontend/ \
-          root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
+      - name: Upload Frontend
+        run: |
+          rsync -avz --delete \
+            publish/frontend/ \
+            root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
 
-    # ---------------------------
-    # RESTART API SERVICE
-    # ---------------------------
-    - name: Restart API Service
-      run: |
-        ssh -i id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VDS_HOST }} \
-          "systemctl restart ${{ inputs.service_name }}"
+      - name: Restart API Service
+        run: |
+          ssh root@${{ secrets.VDS_HOST }} \
+            "systemctl restart ${{ inputs.service_name }}"
