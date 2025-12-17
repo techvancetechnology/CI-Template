@@ -1,4 +1,4 @@
-name: Reusable .NET + React Deploy (rsync)
+name: Reusable .NET + React Deploy (rsync, verified)
 
 on:
   workflow_call:
@@ -6,11 +6,11 @@ on:
       vite_api_base_url:
         required: true
         type: string
-        
+
       vite_public_base_url:
         required: true
         type: string
-    
+
       remote_root_path:
         required: true
         type: string
@@ -43,14 +43,30 @@ jobs:
       REMOTE_ROOT: ${{ inputs.remote_root_path }}
 
     steps:
-      - name: Checkout
+      # --------------------------------------------------
+      # CHECKOUT
+      # --------------------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v3
 
+      # --------------------------------------------------
+      # BACKEND BUILD
+      # --------------------------------------------------
       - name: Setup .NET
         uses: actions/setup-dotnet@v3
         with:
           dotnet-version: 9.0.x
 
+      - name: Build Backend
+        run: |
+          echo "🔧 Building backend"
+          cd ${{ inputs.backend_path }}
+          dotnet restore
+          dotnet publish -c Release -o $GITHUB_WORKSPACE/publish/backend
+
+      # --------------------------------------------------
+      # FRONTEND BUILD (CRITICAL PART)
+      # --------------------------------------------------
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
@@ -58,24 +74,43 @@ jobs:
           cache: npm
           cache-dependency-path: ${{ inputs.frontend_path }}/package-lock.json
 
-      - name: Build Backend
-        run: |
-          cd ${{ inputs.backend_path }}
-          dotnet restore
-          dotnet publish -c Release -o $GITHUB_WORKSPACE/publish/backend
-
-      - name: Build Frontend
+      - name: Build Frontend (with env validation)
         env:
           VITE_API_BASE_URL: ${{ inputs.vite_api_base_url }}
           VITE_PUBLIC_BASE_URL: ${{ inputs.vite_public_base_url }}
-      
         run: |
+          echo "🔎 VITE_API_BASE_URL = $VITE_API_BASE_URL"
+          echo "🔎 VITE_PUBLIC_BASE_URL = $VITE_PUBLIC_BASE_URL"
+
+          if [ -z "$VITE_API_BASE_URL" ]; then
+            echo "❌ VITE_API_BASE_URL IS EMPTY – ABORTING BUILD"
+            exit 1
+          fi
+
+          if [ -z "$VITE_PUBLIC_BASE_URL" ]; then
+            echo "❌ VITE_PUBLIC_BASE_URL IS EMPTY – ABORTING BUILD"
+            exit 1
+          fi
+
           cd ${{ inputs.frontend_path }}
+
+          echo "📦 Installing frontend dependencies"
           npm install
+
+          echo "🏗️ Running Vite build"
           npm run build
+
+          echo "🔍 Verifying build output contains API URL"
+          grep -R "$VITE_API_BASE_URL" dist \
+            || (echo "❌ API URL NOT FOUND IN BUILD OUTPUT" && exit 1)
+
+          echo "📁 Preparing publish directory"
           mkdir -p ../publish/frontend
           cp -r dist/* ../publish/frontend/
 
+      # --------------------------------------------------
+      # SSH SETUP
+      # --------------------------------------------------
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -83,19 +118,31 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.VDS_HOST }} >> ~/.ssh/known_hosts
 
+      # --------------------------------------------------
+      # DEPLOY BACKEND
+      # --------------------------------------------------
       - name: Upload Backend
         run: |
+          echo "🚀 Uploading backend to $REMOTE_ROOT/backend"
           rsync -avz --delete \
             publish/backend/ \
             root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/
 
+      # --------------------------------------------------
+      # DEPLOY FRONTEND
+      # --------------------------------------------------
       - name: Upload Frontend
         run: |
+          echo "🚀 Uploading frontend to $REMOTE_ROOT/frontend"
           rsync -avz --delete \
             publish/frontend/ \
             root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
 
+      # --------------------------------------------------
+      # RESTART SERVICE
+      # --------------------------------------------------
       - name: Restart API Service
         run: |
+          echo "🔁 Restarting service ${{ inputs.service_name }}"
           ssh root@${{ secrets.VDS_HOST }} \
             "systemctl restart ${{ inputs.service_name }}"
