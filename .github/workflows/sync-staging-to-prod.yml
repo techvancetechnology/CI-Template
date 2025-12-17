@@ -1,0 +1,51 @@
+name: Sync STAGING to PROD
+
+on:
+  workflow_call:
+    inputs:
+      staging_root_path:
+        required: true
+        type: string
+
+      prod_root_path:
+        required: true
+        type: string
+
+      prod_service_name:
+        required: true
+        type: string
+
+    secrets:
+      VDS_HOST:
+        required: true
+      VDS_SSH_KEY:
+        required: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup SSH
+        run: |
+          echo "${{ secrets.VDS_SSH_KEY }}" > id_rsa
+          chmod 600 id_rsa
+
+      - name: Sync backend
+        run: |
+          rsync -avz --delete \
+            -e "ssh -i id_rsa -o StrictHostKeyChecking=no" \
+            root@${{ secrets.VDS_HOST }}:${{ inputs.staging_root_path }}/backend/ \
+            root@${{ secrets.VDS_HOST }}:${{ inputs.prod_root_path }}/backend/
+
+      - name: Sync frontend
+        run: |
+          rsync -avz --delete \
+            -e "ssh -i id_rsa -o StrictHostKeyChecking=no" \
+            root@${{ secrets.VDS_HOST }}:${{ inputs.staging_root_path }}/frontend/ \
+            root@${{ secrets.VDS_HOST }}:${{ inputs.prod_root_path }}/frontend/
+
+      - name: Restart PROD service
+        run: |
+          ssh -i id_rsa -o StrictHostKeyChecking=no root@${{ secrets.VDS_HOST }} \
+            "systemctl restart ${{ inputs.prod_service_name }}"
