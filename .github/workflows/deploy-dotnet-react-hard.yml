@@ -1,0 +1,129 @@
+name: Reusable .NET + React HARD Deploy (clean & deploy)
+
+on:
+  workflow_call:
+    inputs:
+      remote_root_path:
+        required: true
+        type: string
+
+      service_name:
+        required: true
+        type: string
+
+      vite_api_base_url:
+        required: true
+        type: string
+
+      vite_public_base_url:
+        required: true
+        type: string
+
+      backend_path:
+        required: false
+        type: string
+        default: backend
+
+      frontend_path:
+        required: false
+        type: string
+        default: frontend
+
+    secrets:
+      VDS_HOST:
+        required: true
+      VDS_SSH_KEY:
+        required: true
+
+jobs:
+  hard-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      REMOTE_ROOT: ${{ inputs.remote_root_path }}
+
+    steps:
+      # --------------------
+      # CHECKOUT
+      # --------------------
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      # --------------------
+      # BUILD BACKEND
+      # --------------------
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Build Backend
+        run: |
+          cd ${{ inputs.backend_path }}
+          dotnet restore
+          dotnet publish -c Release -o $GITHUB_WORKSPACE/publish/backend
+
+      # --------------------
+      # BUILD FRONTEND
+      # --------------------
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Build Frontend
+        env:
+          VITE_API_BASE_URL: ${{ inputs.vite_api_base_url }}
+          VITE_PUBLIC_BASE_URL: ${{ inputs.vite_public_base_url }}
+        run: |
+          cd ${{ inputs.frontend_path }}
+          npm install
+          npm run build
+          mkdir -p ../publish/frontend
+          cp -r dist/* ../publish/frontend/
+
+      # --------------------
+      # SSH
+      # --------------------
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.VDS_HOST }} >> ~/.ssh/known_hosts
+
+      # --------------------
+      # HARD CLEAN (REMOTE)
+      # --------------------
+      - name: HARD CLEAN remote frontend & backend
+        run: |
+          ssh root@${{ secrets.VDS_HOST }} <<EOF
+          echo "🧹 HARD CLEAN on $REMOTE_ROOT"
+          systemctl stop ${{ inputs.service_name }} || true
+          rm -rf $REMOTE_ROOT/frontend/*
+          rm -rf $REMOTE_ROOT/backend/*
+          EOF
+
+      # --------------------
+      # DEPLOY BACKEND
+      # --------------------
+      - name: Upload Backend
+        run: |
+          rsync -avz publish/backend/ \
+            root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/
+
+      # --------------------
+      # DEPLOY FRONTEND
+      # --------------------
+      - name: Upload Frontend
+        run: |
+          rsync -avz publish/frontend/ \
+            root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
+
+      # --------------------
+      # RESTART SERVICE
+      # --------------------
+      - name: Restart API Service
+        run: |
+          ssh root@${{ secrets.VDS_HOST }} \
+            "systemctl start ${{ inputs.service_name }}"
