@@ -3,27 +3,22 @@ name: Reusable .NET + React Deploy (rsync)
 on:
   workflow_call:
     inputs:
-      vite_api_base_url:
-        required: true
-        type: string
-
-      vite_public_base_url:
-        required: true
-        type: string
-
       remote_root_path:
         required: true
         type: string
-
       service_name:
         required: true
         type: string
-
+      vite_api_base_url:
+        required: true
+        type: string
+      vite_public_base_url:
+        required: true
+        type: string
       backend_path:
         required: false
         type: string
         default: backend
-
       frontend_path:
         required: false
         type: string
@@ -43,17 +38,15 @@ jobs:
       REMOTE_ROOT: ${{ inputs.remote_root_path }}
 
     steps:
-      # --------------------
+      # ======================
       # CHECKOUT
-      # --------------------
-      - name: Checkout
-        uses: actions/checkout@v3
+      # ======================
+      - uses: actions/checkout@v3
 
-      # --------------------
+      # ======================
       # BACKEND
-      # --------------------
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v3
+      # ======================
+      - uses: actions/setup-dotnet@v3
         with:
           dotnet-version: 9.0.x
 
@@ -63,11 +56,10 @@ jobs:
           dotnet restore
           dotnet publish -c Release -o $GITHUB_WORKSPACE/publish/backend
 
-      # --------------------
+      # ======================
       # FRONTEND
-      # --------------------
-      - name: Setup Node
-        uses: actions/setup-node@v3
+      # ======================
+      - uses: actions/setup-node@v3
         with:
           node-version: 20
           cache: npm
@@ -81,12 +73,12 @@ jobs:
           cd ${{ inputs.frontend_path }}
           npm install
           npm run build
-          mkdir -p ../publish/frontend
-          cp -r dist/* ../publish/frontend/
+          mkdir -p $GITHUB_WORKSPACE/publish/frontend
+          cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
 
-      # --------------------
+      # ======================
       # SSH
-      # --------------------
+      # ======================
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -94,22 +86,22 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.VDS_HOST }} >> ~/.ssh/known_hosts
 
-      # --------------------
+      # ======================
       # DEPLOY
-      # --------------------
+      # ======================
       - name: Upload Backend
         run: |
           rsync -avz --delete \
-            publish/backend/ \
+            $GITHUB_WORKSPACE/publish/backend/ \
             root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/
 
       - name: Upload Frontend
         run: |
           rsync -avz --delete \
-            publish/frontend/ \
+            $GITHUB_WORKSPACE/publish/frontend/ \
             root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
 
-      - name: Restart API Service
+      - name: Restart Service
         run: |
           ssh root@${{ secrets.VDS_HOST }} \
             "systemctl restart ${{ inputs.service_name }}"
