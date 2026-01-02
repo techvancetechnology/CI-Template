@@ -18,6 +18,10 @@ on:
       backend_path:
         required: true
         type: string
+      backend_target_subdir:          # ✅ YENİ
+        required: false
+        type: string
+        default: "."
       frontend_path:
         required: true
         type: string
@@ -34,16 +38,11 @@ jobs:
 
     env:
       REMOTE_ROOT: ${{ inputs.remote_root_path }}
+      BACKEND_TARGET: ${{ inputs.backend_target_subdir }}
 
     steps:
-      # ======================
-      # CHECKOUT
-      # ======================
       - uses: actions/checkout@v3
 
-      # ======================
-      # BACKEND BUILD
-      # ======================
       - uses: actions/setup-dotnet@v3
         with:
           dotnet-version: 9.0.x
@@ -54,9 +53,6 @@ jobs:
           dotnet restore
           dotnet publish -c Release -o $GITHUB_WORKSPACE/publish/backend
 
-      # ======================
-      # FRONTEND BUILD
-      # ======================
       - uses: actions/setup-node@v3
         with:
           node-version: 20
@@ -72,9 +68,6 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/publish/frontend
           cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
 
-      # ======================
-      # SSH SETUP
-      # ======================
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -82,26 +75,19 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.VDS_HOST }} >> ~/.ssh/known_hosts
 
-      # ======================
-      # HARD CLEAN
-      # ======================
       - name: HARD CLEAN remote
         run: |
           ssh root@${{ secrets.VDS_HOST }} <<EOF
             systemctl stop ${{ inputs.service_name }} || true
-            mkdir -p $REMOTE_ROOT/backend $REMOTE_ROOT/frontend
-            rm -rf $REMOTE_ROOT/backend/*
-            rm -rf $REMOTE_ROOT/frontend/*
+            mkdir -p $REMOTE_ROOT/backend/$BACKEND_TARGET $REMOTE_ROOT/frontend
+            rm -rf $REMOTE_ROOT/backend/$BACKEND_TARGET/*
           EOF
 
-      # ======================
-      # DEPLOY
-      # ======================
       - name: Upload Backend
         run: |
           rsync -avz --delete \
             $GITHUB_WORKSPACE/publish/backend/ \
-            root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/
+            root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/$BACKEND_TARGET/
 
       - name: Upload Frontend
         run: |
