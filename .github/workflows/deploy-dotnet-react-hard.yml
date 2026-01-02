@@ -6,23 +6,18 @@ on:
       remote_root_path:
         required: true
         type: string
-
       service_name:
         required: true
         type: string
-
       vite_api_base_url:
         required: true
         type: string
-
       vite_public_base_url:
         required: true
         type: string
-
       backend_path:
         required: true
         type: string
-
       frontend_path:
         required: true
         type: string
@@ -41,27 +36,17 @@ jobs:
       REMOTE_ROOT: ${{ inputs.remote_root_path }}
 
     steps:
-      # ==================================================
+      # ======================
       # CHECKOUT
-      # ==================================================
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      # ======================
+      - uses: actions/checkout@v3
 
-      # ==================================================
+      # ======================
       # BACKEND BUILD
-      # ==================================================
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v3
+      # ======================
+      - uses: actions/setup-dotnet@v3
         with:
           dotnet-version: 9.0.x
-
-      - name: Validate backend path
-        run: |
-          echo "🔍 Checking backend path: ${{ inputs.backend_path }}"
-          if ! ls ${{ inputs.backend_path }}/*.csproj >/dev/null 2>&1; then
-            echo "❌ No .csproj found in backend_path"
-            exit 1
-          fi
 
       - name: Build Backend
         run: |
@@ -69,21 +54,12 @@ jobs:
           dotnet restore
           dotnet publish -c Release -o $GITHUB_WORKSPACE/publish/backend
 
-      # ==================================================
+      # ======================
       # FRONTEND BUILD
-      # ==================================================
-      - name: Setup Node
-        uses: actions/setup-node@v3
+      # ======================
+      - uses: actions/setup-node@v3
         with:
           node-version: 20
-
-      - name: Validate frontend path
-        run: |
-          echo "🔍 Checking frontend path: ${{ inputs.frontend_path }}"
-          if [ ! -f "${{ inputs.frontend_path }}/package.json" ]; then
-            echo "❌ package.json not found in frontend_path"
-            exit 1
-          fi
 
       - name: Build Frontend
         env:
@@ -96,9 +72,9 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/publish/frontend
           cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
 
-      # ==================================================
+      # ======================
       # SSH SETUP
-      # ==================================================
+      # ======================
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -106,41 +82,34 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.VDS_HOST }} >> ~/.ssh/known_hosts
 
-      # ==================================================
-      # HARD CLEAN (REMOTE)
-      # ==================================================
-      - name: HARD CLEAN remote backend & frontend
+      # ======================
+      # HARD CLEAN
+      # ======================
+      - name: HARD CLEAN remote
         run: |
           ssh root@${{ secrets.VDS_HOST }} <<EOF
-            echo "🧹 HARD CLEAN on $REMOTE_ROOT"
             systemctl stop ${{ inputs.service_name }} || true
             mkdir -p $REMOTE_ROOT/backend $REMOTE_ROOT/frontend
             rm -rf $REMOTE_ROOT/backend/*
             rm -rf $REMOTE_ROOT/frontend/*
           EOF
 
-      # ==================================================
-      # DEPLOY BACKEND
-      # ==================================================
+      # ======================
+      # DEPLOY
+      # ======================
       - name: Upload Backend
         run: |
           rsync -avz --delete \
             $GITHUB_WORKSPACE/publish/backend/ \
             root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/
 
-      # ==================================================
-      # DEPLOY FRONTEND
-      # ==================================================
       - name: Upload Frontend
         run: |
           rsync -avz --delete \
             $GITHUB_WORKSPACE/publish/frontend/ \
             root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
 
-      # ==================================================
-      # RESTART SERVICE
-      # ==================================================
-      - name: Restart Service
+      - name: Start Service
         run: |
           ssh root@${{ secrets.VDS_HOST }} \
             "systemctl start ${{ inputs.service_name }}"
