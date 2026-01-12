@@ -18,7 +18,7 @@ on:
       backend_path:
         required: true
         type: string
-      backend_target_subdir:          # ✅ YENİ
+      backend_target_subdir:
         required: false
         type: string
         default: "."
@@ -52,6 +52,23 @@ jobs:
           cd ${{ inputs.backend_path }}
           dotnet restore
           dotnet publish -c Release -o $GITHUB_WORKSPACE/publish/backend
+
+      # ======================
+      # BUILD INFO (⬅️ EKLENEN)
+      # ======================
+      - name: Generate build-info.json
+        run: |
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          cat <<EOF > $GITHUB_WORKSPACE/publish/backend/build-info.json
+          {
+            "service": "${{ inputs.service_name }}",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "buildTime": "$BUILD_TIME",
+            "pipeline": "github-actions",
+            "runId": "${{ github.run_id }}"
+          }
+          EOF
 
       - uses: actions/setup-node@v3
         with:
