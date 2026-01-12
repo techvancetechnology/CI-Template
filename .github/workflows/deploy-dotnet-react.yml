@@ -29,10 +29,10 @@ on:
         type: string
         default: frontend
 
-      backend_target_subdir:          # ✅ YENİ – OPSİYONEL
+      backend_target_subdir:
         required: false
         type: string
-        default: "."                  # ⬅️ ESKİ DAVRANIŞI KORUR
+        default: "."
 
     secrets:
       VDS_HOST:
@@ -49,14 +49,8 @@ jobs:
       BACKEND_TARGET: ${{ inputs.backend_target_subdir }}
 
     steps:
-      # ======================
-      # CHECKOUT
-      # ======================
       - uses: actions/checkout@v3
 
-      # ======================
-      # BACKEND BUILD
-      # ======================
       - uses: actions/setup-dotnet@v3
         with:
           dotnet-version: 9.0.x
@@ -68,8 +62,22 @@ jobs:
           dotnet publish -c Release -o $GITHUB_WORKSPACE/publish/backend
 
       # ======================
-      # FRONTEND BUILD
+      # BUILD INFO (⬅️ EKLENEN)
       # ======================
+      - name: Generate build-info.json
+        run: |
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          cat <<EOF > $GITHUB_WORKSPACE/publish/backend/build-info.json
+          {
+            "service": "${{ inputs.service_name }}",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "buildTime": "$BUILD_TIME",
+            "pipeline": "github-actions",
+            "runId": "${{ github.run_id }}"
+          }
+          EOF
+
       - uses: actions/setup-node@v3
         with:
           node-version: 20
@@ -87,9 +95,6 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/publish/frontend
           cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
 
-      # ======================
-      # SSH SETUP
-      # ======================
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -97,9 +102,6 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.VDS_HOST }} >> ~/.ssh/known_hosts
 
-      # ======================
-      # DEPLOY BACKEND
-      # ======================
       - name: Upload Backend
         run: |
           ssh root@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/backend/$BACKEND_TARGET"
@@ -107,18 +109,12 @@ jobs:
             $GITHUB_WORKSPACE/publish/backend/ \
             root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/$BACKEND_TARGET/
 
-      # ======================
-      # DEPLOY FRONTEND
-      # ======================
       - name: Upload Frontend
         run: |
           rsync -avz --delete \
             $GITHUB_WORKSPACE/publish/frontend/ \
             root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
 
-      # ======================
-      # RESTART SERVICE
-      # ======================
       - name: Restart Service
         run: |
           ssh root@${{ secrets.VDS_HOST }} \
