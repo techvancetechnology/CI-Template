@@ -6,25 +6,28 @@ on:
       remote_root_path:
         required: true
         type: string
+
       service_name:
         required: true
         type: string
+
       vite_api_base_url:
         required: true
         type: string
+
       vite_public_base_url:
         required: true
         type: string
+
       backend_path:
-        required: true
-        type: string
-      backend_target_subdir:
         required: false
         type: string
-        default: "."
+        default: backend
+
       frontend_path:
-        required: true
+        required: false
         type: string
+        default: frontend
 
     secrets:
       VDS_HOST:
@@ -38,12 +41,13 @@ jobs:
 
     env:
       REMOTE_ROOT: ${{ inputs.remote_root_path }}
-      BACKEND_TARGET: ${{ inputs.backend_target_subdir }}
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v3
 
-      - uses: actions/setup-dotnet@v3
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
         with:
           dotnet-version: 9.0.x
 
@@ -53,9 +57,6 @@ jobs:
           dotnet restore
           dotnet publish -c Release -o $GITHUB_WORKSPACE/publish/backend
 
-      # ======================
-      # BUILD INFO (⬅️ EKLENEN)
-      # ======================
       - name: Generate build-info.json
         run: |
           BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -70,7 +71,8 @@ jobs:
           }
           EOF
 
-      - uses: actions/setup-node@v3
+      - name: Setup Node
+        uses: actions/setup-node@v3
         with:
           node-version: 20
 
@@ -80,7 +82,7 @@ jobs:
           VITE_PUBLIC_BASE_URL: ${{ inputs.vite_public_base_url }}
         run: |
           cd ${{ inputs.frontend_path }}
-          npm install
+          npm ci
           npm run build
           mkdir -p $GITHUB_WORKSPACE/publish/frontend
           cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
@@ -96,23 +98,23 @@ jobs:
         run: |
           ssh root@${{ secrets.VDS_HOST }} <<EOF
             systemctl stop ${{ inputs.service_name }} || true
-            mkdir -p $REMOTE_ROOT/backend/$BACKEND_TARGET $REMOTE_ROOT/frontend
-            rm -rf $REMOTE_ROOT/backend/$BACKEND_TARGET/*
+            mkdir -p $REMOTE_ROOT/backend $REMOTE_ROOT/frontend
+            rm -rf $REMOTE_ROOT/backend/*
+            rm -rf $REMOTE_ROOT/frontend/*
           EOF
 
       - name: Upload Backend
         run: |
-          rsync -avz --delete \
+          rsync -avz \
             $GITHUB_WORKSPACE/publish/backend/ \
-            root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/$BACKEND_TARGET/
+            root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/
 
       - name: Upload Frontend
         run: |
-          rsync -avz --delete \
+          rsync -avz \
             $GITHUB_WORKSPACE/publish/frontend/ \
             root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
 
       - name: Start Service
         run: |
-          ssh root@${{ secrets.VDS_HOST }} \
-            "systemctl start ${{ inputs.service_name }}"
+          ssh root@${{ secrets.VDS_HOST }} "systemctl start ${{ inputs.service_name }}"
