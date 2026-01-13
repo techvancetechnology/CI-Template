@@ -29,11 +29,6 @@ on:
         type: string
         default: frontend
 
-      backend_target_subdir:
-        required: false
-        type: string
-        default: "."
-
     secrets:
       VDS_HOST:
         required: true
@@ -46,12 +41,13 @@ jobs:
 
     env:
       REMOTE_ROOT: ${{ inputs.remote_root_path }}
-      BACKEND_TARGET: ${{ inputs.backend_target_subdir }}
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v3
 
-      - uses: actions/setup-dotnet@v3
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
         with:
           dotnet-version: 9.0.x
 
@@ -61,9 +57,6 @@ jobs:
           dotnet restore
           dotnet publish -c Release -o $GITHUB_WORKSPACE/publish/backend
 
-      # ======================
-      # BUILD INFO (⬅️ EKLENEN)
-      # ======================
       - name: Generate build-info.json
         run: |
           BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -78,7 +71,8 @@ jobs:
           }
           EOF
 
-      - uses: actions/setup-node@v3
+      - name: Setup Node
+        uses: actions/setup-node@v3
         with:
           node-version: 20
           cache: npm
@@ -90,7 +84,7 @@ jobs:
           VITE_PUBLIC_BASE_URL: ${{ inputs.vite_public_base_url }}
         run: |
           cd ${{ inputs.frontend_path }}
-          npm install
+          npm ci
           npm run build
           mkdir -p $GITHUB_WORKSPACE/publish/frontend
           cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
@@ -104,18 +98,18 @@ jobs:
 
       - name: Upload Backend
         run: |
-          ssh root@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/backend/$BACKEND_TARGET"
+          ssh root@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/backend"
           rsync -avz --delete \
             $GITHUB_WORKSPACE/publish/backend/ \
-            root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/$BACKEND_TARGET/
+            root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/
 
       - name: Upload Frontend
         run: |
+          ssh root@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/frontend"
           rsync -avz --delete \
             $GITHUB_WORKSPACE/publish/frontend/ \
             root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
 
       - name: Restart Service
         run: |
-          ssh root@${{ secrets.VDS_HOST }} \
-            "systemctl restart ${{ inputs.service_name }}"
+          ssh root@${{ secrets.VDS_HOST }} "systemctl restart ${{ inputs.service_name }}"
