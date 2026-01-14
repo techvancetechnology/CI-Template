@@ -106,10 +106,12 @@ jobs:
 
       # === STOP SERVICES ===
       - name: Stop Services
+        env:
+          VDS_HOST: ${{ secrets.VDS_HOST }}
         run: |
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
           for svc in "${SERVICES[@]}"; do
-            ssh root@$secrets.VDS_HOST "systemctl stop $svc || true"
+            ssh root@$VDS_HOST "systemctl stop $svc || true"
           done
 
       # === HARD CLEAN ===
