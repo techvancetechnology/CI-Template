@@ -134,6 +134,9 @@ jobs:
       # SSH
       # =========================================================
       - name: Setup SSH
+        env:
+          VDS_HOST: ${{ secrets.VDS_HOST }}    
+          VDS_SSH_KEY: ${{ secrets.VDS_SSH_KEY }}  
         run: |
           mkdir -p ~/.ssh
           echo "$VDS_SSH_KEY" > ~/.ssh/id_rsa
@@ -144,6 +147,8 @@ jobs:
       # DEPLOY
       # =========================================================
       - name: Upload Backend(s)
+        env:
+          VDS_HOST: ${{ secrets.VDS_HOST }}    
         run: |
           set -e
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
@@ -155,6 +160,8 @@ jobs:
           done
 
       - name: Upload Frontend
+        env:
+          VDS_HOST: ${{ secrets.VDS_HOST }}    
         run: |
           ssh root@$VDS_HOST "mkdir -p $REMOTE_ROOT/frontend"
           rsync -avz --delete \
@@ -162,6 +169,8 @@ jobs:
             "root@$VDS_HOST:$REMOTE_ROOT/frontend/"
 
       - name: Restart Service(s)
+        env:
+          VDS_HOST: ${{ secrets.VDS_HOST }}     
         run: |
           set -e
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
