@@ -96,6 +96,23 @@ jobs:
               "$OUT_DIR/build-info.json"
           done
 
+      # === FRONTEND BUILD ===
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build Frontend
+        env:
+          VITE_API_BASE_URL: ${{ inputs.vite_api_base_url }}
+          VITE_PUBLIC_BASE_URL: ${{ inputs.vite_public_base_url }}
+        run: |
+          cd ${{ inputs.frontend_path }}
+          npm ci
+          npm run build
+          mkdir -p $GITHUB_WORKSPACE/publish/frontend
+          cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
+
       # === SSH ===
       - name: Setup SSH
         run: |
