@@ -34,12 +34,14 @@ on:
         required: false
         type: string
         default: backend
-        description: "Comma separated backend folders (api,worker or backend)"
+        description: "Comma separated backend apps (backend,worker)"
+
     secrets:
       VDS_HOST:
         required: true
       VDS_SSH_KEY:
         required: true
+
 jobs:
   hard-deploy:
     runs-on: ubuntu-latest
@@ -61,53 +63,45 @@ jobs:
       # =========================================================
       - name: Build Backend(s)
         run: |
+          set -e
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
-          
+
           for app in "${APPS[@]}"; do
             echo "▶ Building backend: $app"
-          
+
             if [ "$app" = "backend" ]; then
-              PROJECT=$(find "backend" -maxdepth 1 -name "*.csproj" | head -n 1)
+              PROJECT=$(find backend -maxdepth 1 -name "*.csproj" | head -n 1)
               OUT_DIR="$GITHUB_WORKSPACE/publish/backend"
             else
-              PROJECT=$(find "backend/$app" -maxdepth 1 -name "*.csproj" | head -n 1)
+              PROJECT=$(find "$app" -maxdepth 1 -name "*.csproj" | head -n 1)
               OUT_DIR="$GITHUB_WORKSPACE/publish/$app"
             fi
-          
+
             if [ -z "$PROJECT" ]; then
               echo "❌ .csproj not found for $app"
               exit 1
             fi
-          
+
             echo "▶ Using project: $PROJECT"
             dotnet restore "$PROJECT"
             dotnet publish "$PROJECT" -c Release -o "$OUT_DIR"
+
+            BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            cat <<EOF > "$OUT_DIR/build-info.json"
+            {
+              "app": "$app",
+              "services": "${{ inputs.service_name }}",
+              "commit": "${{ github.sha }}",
+              "branch": "${{ github.ref_name }}",
+              "buildTime": "$BUILD_TIME",
+              "pipeline": "github-actions",
+              "runId": "${{ github.run_id }}"
+            }
+            EOF
           done
 
       # =========================================================
-      # BUILD INFO (PER BACKEND)
-      # =========================================================
-      - name: Generate build-info.json
-        run: |
-          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
-
-          for app in "${APPS[@]}"; do
-            cat <<EOF > $GITHUB_WORKSPACE/publish/$app/build-info.json
-          {
-            "app": "$app",
-            "services": "${{ inputs.service_name }}",
-            "commit": "${{ github.sha }}",
-            "branch": "${{ github.ref_name }}",
-            "buildTime": "$BUILD_TIME",
-            "pipeline": "github-actions",
-            "runId": "${{ github.run_id }}"
-          }
-          EOF
-          done
-
-      # =========================================================
-      # FRONTEND
+      # FRONTEND BUILD
       # =========================================================
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -126,7 +120,7 @@ jobs:
           cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
 
       # =========================================================
-      # SSH
+      # SSH SETUP
       # =========================================================
       - name: Setup SSH
         run: |
@@ -136,7 +130,7 @@ jobs:
           ssh-keyscan -H "$VDS_HOST" >> ~/.ssh/known_hosts
 
       # =========================================================
-      # STOP SERVICES (ALL)
+      # STOP SERVICES
       # =========================================================
       - name: Stop Service(s)
         run: |
@@ -157,12 +151,14 @@ jobs:
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
 
           for app in "${APPS[@]}"; do
+            echo "▶ Cleaning backend: $app"
             ssh root@$VDS_HOST "
               mkdir -p $REMOTE_ROOT/backend/$app
               rm -rf $REMOTE_ROOT/backend/$app/*
             "
           done
 
+          echo "▶ Cleaning frontend"
           ssh root@$VDS_HOST "
             mkdir -p $REMOTE_ROOT/frontend
             rm -rf $REMOTE_ROOT/frontend/*
@@ -179,8 +175,8 @@ jobs:
           for app in "${APPS[@]}"; do
             echo "▶ Uploading backend: $app"
             rsync -avz \
-              $GITHUB_WORKSPACE/publish/$app/ \
-              root@$VDS_HOST:$REMOTE_ROOT/backend/$app/
+              "$GITHUB_WORKSPACE/publish/$app/" \
+              "root@$VDS_HOST:$REMOTE_ROOT/backend/$app/"
           done
 
       # =========================================================
@@ -189,11 +185,11 @@ jobs:
       - name: Upload Frontend
         run: |
           rsync -avz \
-            $GITHUB_WORKSPACE/publish/frontend/ \
-            root@$VDS_HOST:$REMOTE_ROOT/frontend/
+            "$GITHUB_WORKSPACE/publish/frontend/" \
+            "root@$VDS_HOST:$REMOTE_ROOT/frontend/"
 
       # =========================================================
-      # START SERVICES (ALL)
+      # START SERVICES
       # =========================================================
       - name: Start Service(s)
         run: |
