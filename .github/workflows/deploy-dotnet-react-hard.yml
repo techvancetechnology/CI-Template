@@ -100,9 +100,9 @@ jobs:
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
-          echo "$VDS_SSH_KEY" > ~/.ssh/id_rsa
+          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H "$VDS_HOST" >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.VDS_HOST }} >> ~/.ssh/known_hosts
 
       # === STOP SERVICES ===
       - name: Stop Services
