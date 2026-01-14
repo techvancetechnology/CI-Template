@@ -181,10 +181,10 @@ jobs:
           VDS_HOST: ${{ secrets.VDS_HOST }}
           REMOTE_ROOT: ${{ inputs.remote_root_path }}
         run: |
-          ssh root@$VDS_HOST "mkdir -p $REMOTE_ROOT/frontend"
+          ssh root@$VDS_HOST "mkdir -p $REMOTE_ROOT"
           rsync -avz \
             "$GITHUB_WORKSPACE/publish/frontend/" \
-            "root@$VDS_HOST:$REMOTE_ROOT/frontend/"
+            "root@$VDS_HOST:$REMOTE_ROOT/"
 
       - name: Start Services
         if: inputs.deploy_mode != 'fe'
