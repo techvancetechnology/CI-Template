@@ -109,7 +109,7 @@ jobs:
         run: |
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
           for svc in "${SERVICES[@]}"; do
-            ssh root@$VDS_HOST "systemctl stop $svc || true"
+            ssh root@$secrets.VDS_HOST "systemctl stop $svc || true"
           done
 
       # === HARD CLEAN ===
@@ -117,22 +117,22 @@ jobs:
         run: |
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
           for app in "${APPS[@]}"; do
-            ssh root@$VDS_HOST "rm -rf $REMOTE_ROOT/backend/$app/* || true"
+            ssh root@$secrets.VDS_HOST "rm -rf $REMOTE_ROOT/backend/$app/* || true"
           done
-          ssh root@$VDS_HOST "rm -rf $REMOTE_ROOT/frontend/* || true"
+          ssh root@$secrets.VDS_HOST "rm -rf $REMOTE_ROOT/frontend/* || true"
 
       # === DEPLOY ===
       - name: Upload
         run: |
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
           for app in "${APPS[@]}"; do
-            rsync -avz "$GITHUB_WORKSPACE/publish/$app/" root@$VDS_HOST:$REMOTE_ROOT/backend/$app/
+            rsync -avz "$GITHUB_WORKSPACE/publish/$app/" root@$secrets.VDS_HOST:$REMOTE_ROOT/backend/$app/
           done
-          rsync -avz "$GITHUB_WORKSPACE/publish/frontend/" root@$VDS_HOST:$REMOTE_ROOT/frontend/
+          rsync -avz "$GITHUB_WORKSPACE/publish/frontend/" root@$secrets.VDS_HOST:$REMOTE_ROOT/frontend/
 
       - name: Start Services
         run: |
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
           for svc in "${SERVICES[@]}"; do
-            ssh root@$VDS_HOST "systemctl start $svc"
+            ssh root@$secrets.VDS_HOST "systemctl start $svc"
           done
