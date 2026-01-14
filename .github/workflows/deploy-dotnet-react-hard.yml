@@ -116,25 +116,31 @@ jobs:
 
       # === HARD CLEAN ===
       - name: Clean FS
+        env:
+          VDS_HOST: ${{ secrets.VDS_HOST }}
         run: |
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
           for app in "${APPS[@]}"; do
-            ssh root@$secrets.VDS_HOST "rm -rf $REMOTE_ROOT/backend/$app/* || true"
+            ssh root@$VDS_HOST "rm -rf $REMOTE_ROOT/backend/$app/* || true"
           done
-          ssh root@$secrets.VDS_HOST "rm -rf $REMOTE_ROOT/frontend/* || true"
+          ssh root@$VDS_HOST "rm -rf $REMOTE_ROOT/frontend/* || true"
 
       # === DEPLOY ===
       - name: Upload
+        env:
+          VDS_HOST: ${{ secrets.VDS_HOST }}            
         run: |
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
           for app in "${APPS[@]}"; do
-            rsync -avz "$GITHUB_WORKSPACE/publish/$app/" root@$secrets.VDS_HOST:$REMOTE_ROOT/backend/$app/
+            rsync -avz "$GITHUB_WORKSPACE/publish/$app/" root@$VDS_HOST:$REMOTE_ROOT/backend/$app/
           done
-          rsync -avz "$GITHUB_WORKSPACE/publish/frontend/" root@$secrets.VDS_HOST:$REMOTE_ROOT/frontend/
+          rsync -avz "$GITHUB_WORKSPACE/publish/frontend/" root@$VDS_HOST:$REMOTE_ROOT/frontend/
 
       - name: Start Services
+        env:
+          VDS_HOST: ${{ secrets.VDS_HOST }}      
         run: |
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
           for svc in "${SERVICES[@]}"; do
-            ssh root@$secrets.VDS_HOST "systemctl start $svc"
+            ssh root@$VDS_HOST "systemctl start $svc"
           done
