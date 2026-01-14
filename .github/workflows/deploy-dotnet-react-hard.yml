@@ -54,14 +54,8 @@ jobs:
       REMOTE_ROOT: ${{ inputs.remote_root_path }}
 
     steps:
-      # =========================================================
-      # CHECKOUT
-      # =========================================================
       - uses: actions/checkout@v4
 
-      # =========================================================
-      # BACKEND BUILD
-      # =========================================================
       - uses: actions/setup-dotnet@v4
         if: inputs.deploy_mode != 'fe'
         with:
@@ -75,10 +69,10 @@ jobs:
 
           for app in "${APPS[@]}"; do
             if [ "$app" = "backend" ]; then
-              PROJECT=$(find backend -maxdepth 1 -name "*.csproj" | head -n 1)
+              PROJECT=$(find "${{ inputs.backend_path }}" -maxdepth 3 -name "*.csproj" | head -n 1)
               OUT_DIR="$GITHUB_WORKSPACE/publish/backend"
             else
-              PROJECT=$(find "$app" -maxdepth 1 -name "*.csproj" | head -n 1)
+              PROJECT=$(find "$app" -maxdepth 3 -name "*.csproj" | head -n 1)
               OUT_DIR="$GITHUB_WORKSPACE/publish/$app"
             fi
 
@@ -114,9 +108,6 @@ jobs:
               "$OUT_DIR/build-info.json"
           done
 
-      # =========================================================
-      # FRONTEND BUILD
-      # =========================================================
       - name: Setup Node
         if: inputs.deploy_mode != 'be'
         uses: actions/setup-node@v4
@@ -135,9 +126,6 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/publish/frontend
           cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
 
-      # =========================================================
-      # SSH
-      # =========================================================
       - name: Setup SSH
         env:
           VDS_HOST: ${{ secrets.VDS_HOST }}
@@ -148,9 +136,6 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H "$VDS_HOST" >> ~/.ssh/known_hosts
 
-      # =========================================================
-      # STOP SERVICES (BACKEND ONLY)
-      # =========================================================
       - name: Stop Services
         if: inputs.deploy_mode != 'fe'
         env:
@@ -161,9 +146,6 @@ jobs:
             ssh root@$VDS_HOST "systemctl stop $svc || true"
           done
 
-      # =========================================================
-      # HARD CLEAN
-      # =========================================================
       - name: Clean FS
         env:
           VDS_HOST: ${{ secrets.VDS_HOST }}
@@ -179,9 +161,6 @@ jobs:
             ssh root@$VDS_HOST "rm -rf $REMOTE_ROOT/frontend/* || true"
           fi
 
-      # =========================================================
-      # DEPLOY
-      # =========================================================
       - name: Upload Backend(s)
         if: inputs.deploy_mode != 'fe'
         env:
@@ -205,9 +184,6 @@ jobs:
             "$GITHUB_WORKSPACE/publish/frontend/" \
             "root@$VDS_HOST:$REMOTE_ROOT/frontend/"
 
-      # =========================================================
-      # START SERVICES (BACKEND ONLY)
-      # =========================================================
       - name: Start Services
         if: inputs.deploy_mode != 'fe'
         env:
