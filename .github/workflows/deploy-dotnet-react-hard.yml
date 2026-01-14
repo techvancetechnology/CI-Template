@@ -169,10 +169,10 @@ jobs:
         run: |
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
           for app in "${APPS[@]}"; do
-            ssh root@$VDS_HOST "mkdir -p $REMOTE_ROOT/backend/$app"
+            ssh root@$VDS_HOST "mkdir -p $REMOTE_ROOT/$app"
             rsync -avz \
               "$GITHUB_WORKSPACE/publish/$app/" \
-              "root@$VDS_HOST:$REMOTE_ROOT/backend/$app/"
+              "root@$VDS_HOST:$REMOTE_ROOT/$app/"
           done
 
       - name: Upload Frontend
