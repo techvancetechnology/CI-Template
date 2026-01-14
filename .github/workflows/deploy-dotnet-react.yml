@@ -56,15 +56,9 @@ jobs:
       REMOTE_ROOT: ${{ inputs.remote_root_path }}
 
     steps:
-      # =========================================================
-      # CHECKOUT
-      # =========================================================
       - name: Checkout
         uses: actions/checkout@v4
 
-      # =========================================================
-      # BACKEND BUILD
-      # =========================================================
       - name: Setup .NET
         if: inputs.deploy_mode != 'fe'
         uses: actions/setup-dotnet@v4
@@ -81,10 +75,10 @@ jobs:
             echo "▶ Building backend: $app"
 
             if [ "$app" = "backend" ]; then
-              PROJECT=$(find backend -maxdepth 1 -name "*.csproj" | head -n 1)
+              PROJECT=$(find "${{ inputs.backend_path }}" -maxdepth 3 -name "*.csproj" | head -n 1)
               OUT_DIR="$GITHUB_WORKSPACE/publish/backend"
             else
-              PROJECT=$(find "$app" -maxdepth 1 -name "*.csproj" | head -n 1)
+              PROJECT=$(find "$app" -maxdepth 3 -name "*.csproj" | head -n 1)
               OUT_DIR="$GITHUB_WORKSPACE/publish/$app"
             fi
 
@@ -120,9 +114,6 @@ jobs:
               "$OUT_DIR/build-info.json"
           done
 
-      # =========================================================
-      # FRONTEND BUILD
-      # =========================================================
       - name: Setup Node
         if: inputs.deploy_mode != 'be'
         uses: actions/setup-node@v4
@@ -143,9 +134,6 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/publish/frontend
           cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
 
-      # =========================================================
-      # SSH
-      # =========================================================
       - name: Setup SSH
         env:
           VDS_HOST: ${{ secrets.VDS_HOST }}
@@ -156,9 +144,6 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H "$VDS_HOST" >> ~/.ssh/known_hosts
 
-      # =========================================================
-      # DEPLOY BACKEND
-      # =========================================================
       - name: Upload Backend(s)
         if: inputs.deploy_mode != 'fe'
         env:
@@ -173,9 +158,6 @@ jobs:
               "root@$VDS_HOST:$REMOTE_ROOT/backend/$app/"
           done
 
-      # =========================================================
-      # DEPLOY FRONTEND
-      # =========================================================
       - name: Upload Frontend
         if: inputs.deploy_mode != 'be'
         env:
@@ -186,9 +168,6 @@ jobs:
             "$GITHUB_WORKSPACE/publish/frontend/" \
             "root@$VDS_HOST:$REMOTE_ROOT/frontend/"
 
-      # =========================================================
-      # SERVICE RESTART (BACKEND ONLY)
-      # =========================================================
       - name: Restart Service(s)
         if: inputs.deploy_mode != 'fe'
         env:
