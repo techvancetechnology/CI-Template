@@ -35,8 +35,11 @@ on:
         type: string
         default: backend
         description: "Comma separated backend folders (e.g. api,worker or backend)"
-
-    secrets: inherit
+    secrets:
+      VDS_HOST:
+        required: true
+      VDS_SSH_KEY:
+        required: true
 
 jobs:
   deploy:
