@@ -38,7 +38,6 @@ on:
         required: false
         type: string
         default: be+fe
-        description: "be | fe | be+fe"
 
     secrets:
       VDS_HOST:
@@ -56,6 +55,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # =========================
+      # BACKEND
+      # =========================
       - uses: actions/setup-dotnet@v4
         if: inputs.deploy_mode != 'fe'
         with:
@@ -70,47 +72,23 @@ jobs:
           for app in "${APPS[@]}"; do
             if [ "$app" = "backend" ]; then
               PROJECT=$(find "${{ inputs.backend_path }}" -maxdepth 3 -name "*.csproj" | head -n 1)
-              OUT_DIR="$GITHUB_WORKSPACE/publish/backend"
+              OUT="$GITHUB_WORKSPACE/publish/backend"
             else
               PROJECT=$(find "$app" -maxdepth 3 -name "*.csproj" | head -n 1)
-              OUT_DIR="$GITHUB_WORKSPACE/publish/$app"
+              OUT="$GITHUB_WORKSPACE/publish/$app"
             fi
 
-            if [ -z "$PROJECT" ]; then
-              echo "❌ .csproj not found for $app"
-              exit 1
-            fi
+            [ -z "$PROJECT" ] && echo "❌ csproj not found" && exit 1
 
             dotnet restore "$PROJECT"
-            dotnet publish "$PROJECT" -c Release -o "$OUT_DIR"
-
-            BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-            cat > "$OUT_DIR/build-info.json" <<'EOF'
-          {
-            "app": "__APP__",
-            "services": "__SERVICES__",
-            "commit": "__COMMIT__",
-            "branch": "__BRANCH__",
-            "buildTime": "__BUILD_TIME__",
-            "pipeline": "github-actions",
-            "runId": "__RUN_ID__"
-          }
-          EOF
-
-            sed -i \
-              -e "s/__APP__/$app/g" \
-              -e "s#__SERVICES__#${{ inputs.service_name }}#g" \
-              -e "s/__COMMIT__/${{ github.sha }}/g" \
-              -e "s/__BRANCH__/${{ github.ref_name }}/g" \
-              -e "s/__BUILD_TIME__/$BUILD_TIME/g" \
-              -e "s/__RUN_ID__/${{ github.run_id }}/g" \
-              "$OUT_DIR/build-info.json"
+            dotnet publish "$PROJECT" -c Release -o "$OUT"
           done
 
-      - name: Setup Node
+      # =========================
+      # FRONTEND
+      # =========================
+      - uses: actions/setup-node@v4
         if: inputs.deploy_mode != 'be'
-        uses: actions/setup-node@v4
         with:
           node-version: 20
 
@@ -126,72 +104,63 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/publish/frontend
           cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
 
+      # =========================
+      # SSH
+      # =========================
       - name: Setup SSH
-        env:
-          VDS_HOST: ${{ secrets.VDS_HOST }}
-          VDS_SSH_KEY: ${{ secrets.VDS_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "$VDS_SSH_KEY" > ~/.ssh/id_rsa
+          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H "$VDS_HOST" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts
 
+      # =========================
+      # STOP
+      # =========================
       - name: Stop Services
         if: inputs.deploy_mode != 'fe'
-        env:
-          VDS_HOST: ${{ secrets.VDS_HOST }}
         run: |
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
           for svc in "${SERVICES[@]}"; do
-            ssh root@$VDS_HOST "systemctl stop $svc || true"
+            ssh root@${{ secrets.VDS_HOST }} "systemctl stop $svc || true"
           done
 
-      - name: Clean FS
-        env:
-          VDS_HOST: ${{ secrets.VDS_HOST }}
+      # =========================
+      # CLEAN
+      # =========================
+      - name: Clean Remote FS
         run: |
-          if [ "${{ inputs.deploy_mode }}" != "fe" ]; then
-            IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
-            for app in "${APPS[@]}"; do
-              ssh root@$VDS_HOST "rm -rf $REMOTE_ROOT/backend/$app/* || true"
-            done
-          fi
+          ssh root@${{ secrets.VDS_HOST }} "rm -rf $REMOTE_ROOT/* || true"
 
-          if [ "${{ inputs.deploy_mode }}" != "be" ]; then
-            ssh root@$VDS_HOST "rm -rf $REMOTE_ROOT/frontend/* || true"
-          fi
-
+      # =========================
+      # UPLOAD
+      # =========================
       - name: Upload Backend(s)
         if: inputs.deploy_mode != 'fe'
-        env:
-          VDS_HOST: ${{ secrets.VDS_HOST }}
-          REMOTE_ROOT: ${{ inputs.remote_root_path }}
         run: |
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
           for app in "${APPS[@]}"; do
-            ssh root@$VDS_HOST "mkdir -p $REMOTE_ROOT/$app"
+            ssh root@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/$app"
             rsync -avz \
               "$GITHUB_WORKSPACE/publish/$app/" \
-              "root@$VDS_HOST:$REMOTE_ROOT/$app/"
+              "root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/$app/"
           done
 
       - name: Upload Frontend
         if: inputs.deploy_mode != 'be'
-        env:
-          VDS_HOST: ${{ secrets.VDS_HOST }}
-          REMOTE_ROOT: ${{ inputs.remote_root_path }}
         run: |
-          ssh root@$VDS_HOST "mkdir -p $REMOTE_ROOT"
+          ssh root@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT"
           rsync -avz \
             "$GITHUB_WORKSPACE/publish/frontend/" \
-            "root@$VDS_HOST:$REMOTE_ROOT/"
+            "root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/"
 
+      # =========================
+      # START
+      # =========================
       - name: Start Services
         if: inputs.deploy_mode != 'fe'
-        env:
-          VDS_HOST: ${{ secrets.VDS_HOST }}
         run: |
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
           for svc in "${SERVICES[@]}"; do
-            ssh root@$VDS_HOST "systemctl start $svc"
+            ssh root@${{ secrets.VDS_HOST }} "systemctl start $svc"
           done
