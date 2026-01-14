@@ -10,7 +10,6 @@ on:
       service_name:
         required: true
         type: string
-        description: "Comma separated systemd services (e.g. notifier.service,notifier-worker.service)"
 
       vite_api_base_url:
         required: true
@@ -34,7 +33,6 @@ on:
         required: false
         type: string
         default: backend
-        description: "Comma separated backend apps (backend,worker)"
 
     secrets:
       VDS_HOST:
@@ -50,25 +48,19 @@ jobs:
       REMOTE_ROOT: ${{ inputs.remote_root_path }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 9.0.x
 
-      # =========================================================
-      # BUILD BACKEND(S)
-      # =========================================================
+      # === BACKEND BUILD (AYNI SOFT İLE) ===
       - name: Build Backend(s)
         run: |
           set -e
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
 
           for app in "${APPS[@]}"; do
-            echo "▶ Building backend: $app"
-
             if [ "$app" = "backend" ]; then
               PROJECT=$(find backend -maxdepth 1 -name "*.csproj" | head -n 1)
               OUT_DIR="$GITHUB_WORKSPACE/publish/backend"
@@ -77,52 +69,34 @@ jobs:
               OUT_DIR="$GITHUB_WORKSPACE/publish/$app"
             fi
 
-            if [ -z "$PROJECT" ]; then
-              echo "❌ .csproj not found for $app"
-              exit 1
-            fi
-
-            echo "▶ Using project: $PROJECT"
             dotnet restore "$PROJECT"
             dotnet publish "$PROJECT" -c Release -o "$OUT_DIR"
 
             BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-            
-            cat <<EOF > "$OUT_DIR/build-info.json"
-            {
-              "app": "$app",
-              "services": "notifier-staging.service,notifier-worker-staging.service",
-              "commit": "1c935a38225ec93ccec418a953a88053b74d7b06",
-              "branch": "main",
-              "buildTime": "$BUILD_TIME",
-              "pipeline": "github-actions",
-              "runId": "20987978796"
-            }
-            EOF
+
+            cat > "$OUT_DIR/build-info.json" <<'EOF'
+          {
+            "app": "__APP__",
+            "services": "__SERVICES__",
+            "commit": "__COMMIT__",
+            "branch": "__BRANCH__",
+            "buildTime": "__BUILD_TIME__",
+            "pipeline": "github-actions",
+            "runId": "__RUN_ID__"
+          }
+          EOF
+
+            sed -i \
+              -e "s/__APP__/$app/g" \
+              -e "s#__SERVICES__#${{ inputs.service_name }}#g" \
+              -e "s/__COMMIT__/${{ github.sha }}/g" \
+              -e "s/__BRANCH__/${{ github.ref_name }}/g" \
+              -e "s/__BUILD_TIME__/$BUILD_TIME/g" \
+              -e "s/__RUN_ID__/${{ github.run_id }}/g" \
+              "$OUT_DIR/build-info.json"
           done
 
-      # =========================================================
-      # FRONTEND BUILD
-      # =========================================================
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Build Frontend
-        env:
-          VITE_API_BASE_URL: ${{ inputs.vite_api_base_url }}
-          VITE_PUBLIC_BASE_URL: ${{ inputs.vite_public_base_url }}
-        run: |
-          cd ${{ inputs.frontend_path }}
-          npm ci
-          npm run build
-          mkdir -p $GITHUB_WORKSPACE/publish/frontend
-          cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
-
-      # =========================================================
-      # SSH SETUP
-      # =========================================================
+      # === SSH ===
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -130,74 +104,35 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H "$VDS_HOST" >> ~/.ssh/known_hosts
 
-      # =========================================================
-      # STOP SERVICES
-      # =========================================================
-      - name: Stop Service(s)
+      # === STOP SERVICES ===
+      - name: Stop Services
         run: |
-          set -e
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
-
           for svc in "${SERVICES[@]}"; do
-            echo "▶ Stopping service: $svc"
             ssh root@$VDS_HOST "systemctl stop $svc || true"
           done
 
-      # =========================================================
-      # HARD CLEAN (BACKEND + FRONTEND)
-      # =========================================================
-      - name: HARD CLEAN remote filesystem
+      # === HARD CLEAN ===
+      - name: Clean FS
         run: |
-          set -e
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
-
           for app in "${APPS[@]}"; do
-            echo "▶ Cleaning backend: $app"
-            ssh root@$VDS_HOST "
-              mkdir -p $REMOTE_ROOT/backend/$app
-              rm -rf $REMOTE_ROOT/backend/$app/*
-            "
+            ssh root@$VDS_HOST "rm -rf $REMOTE_ROOT/backend/$app/* || true"
           done
+          ssh root@$VDS_HOST "rm -rf $REMOTE_ROOT/frontend/* || true"
 
-          echo "▶ Cleaning frontend"
-          ssh root@$VDS_HOST "
-            mkdir -p $REMOTE_ROOT/frontend
-            rm -rf $REMOTE_ROOT/frontend/*
-          "
-
-      # =========================================================
-      # UPLOAD BACKEND(S)
-      # =========================================================
-      - name: Upload Backend(s)
+      # === DEPLOY ===
+      - name: Upload
         run: |
-          set -e
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
-
           for app in "${APPS[@]}"; do
-            echo "▶ Uploading backend: $app"
-            rsync -avz \
-              "$GITHUB_WORKSPACE/publish/$app/" \
-              "root@$VDS_HOST:$REMOTE_ROOT/backend/$app/"
+            rsync -avz "$GITHUB_WORKSPACE/publish/$app/" root@$VDS_HOST:$REMOTE_ROOT/backend/$app/
           done
+          rsync -avz "$GITHUB_WORKSPACE/publish/frontend/" root@$VDS_HOST:$REMOTE_ROOT/frontend/
 
-      # =========================================================
-      # UPLOAD FRONTEND
-      # =========================================================
-      - name: Upload Frontend
+      - name: Start Services
         run: |
-          rsync -avz \
-            "$GITHUB_WORKSPACE/publish/frontend/" \
-            "root@$VDS_HOST:$REMOTE_ROOT/frontend/"
-
-      # =========================================================
-      # START SERVICES
-      # =========================================================
-      - name: Start Service(s)
-        run: |
-          set -e
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
-
           for svc in "${SERVICES[@]}"; do
-            echo "▶ Starting service: $svc"
             ssh root@$VDS_HOST "systemctl start $svc"
           done
