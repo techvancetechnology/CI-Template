@@ -165,6 +165,7 @@ jobs:
         if: inputs.deploy_mode != 'fe'
         env:
           VDS_HOST: ${{ secrets.VDS_HOST }}
+          REMOTE_ROOT: ${{ inputs.remote_root_path }}
         run: |
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
           for app in "${APPS[@]}"; do
@@ -178,6 +179,7 @@ jobs:
         if: inputs.deploy_mode != 'be'
         env:
           VDS_HOST: ${{ secrets.VDS_HOST }}
+          REMOTE_ROOT: ${{ inputs.remote_root_path }}
         run: |
           ssh root@$VDS_HOST "mkdir -p $REMOTE_ROOT/frontend"
           rsync -avz \
