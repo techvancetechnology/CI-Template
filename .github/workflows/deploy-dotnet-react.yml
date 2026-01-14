@@ -91,12 +91,12 @@ jobs:
             cat <<EOF > "$OUT_DIR/build-info.json"
             {
               "app": "$app",
-              "services": "${{ inputs.service_name }}",
-              "commit": "${{ github.sha }}",
-              "branch": "${{ github.ref_name }}",
+              "services": "notifier-staging.service,notifier-worker-staging.service",
+              "commit": "1c935a38225ec93ccec418a953a88053b74d7b06",
+              "branch": "main",
               "buildTime": "$BUILD_TIME",
               "pipeline": "github-actions",
-              "runId": "${{ github.run_id }}"
+              "runId": "20987978796"
             }
             EOF
           done
