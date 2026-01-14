@@ -34,7 +34,8 @@ on:
         required: false
         type: string
         default: backend
-        description: "Comma separated backend folders (e.g. api,worker or backend)"
+        description: "Comma separated backend apps (backend,worker)"
+
     secrets:
       VDS_HOST:
         required: true
@@ -58,57 +59,49 @@ jobs:
           dotnet-version: 9.0.x
 
       # =========================================================
-      # BACKEND BUILD (MULTI)
+      # BACKEND BUILD (API + WORKER)
       # =========================================================
       - name: Build Backend(s)
         run: |
+          set -e
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
-          
+
           for app in "${APPS[@]}"; do
             echo "▶ Building backend: $app"
-          
+
             if [ "$app" = "backend" ]; then
-              PROJECT=$(find "backend" -maxdepth 1 -name "*.csproj" | head -n 1)
+              PROJECT=$(find backend -maxdepth 1 -name "*.csproj" | head -n 1)
               OUT_DIR="$GITHUB_WORKSPACE/publish/backend"
             else
-              PROJECT=$(find "backend/$app" -maxdepth 1 -name "*.csproj" | head -n 1)
+              PROJECT=$(find "$app" -maxdepth 1 -name "*.csproj" | head -n 1)
               OUT_DIR="$GITHUB_WORKSPACE/publish/$app"
             fi
-          
+
             if [ -z "$PROJECT" ]; then
               echo "❌ .csproj not found for $app"
               exit 1
             fi
-          
+
             echo "▶ Using project: $PROJECT"
             dotnet restore "$PROJECT"
             dotnet publish "$PROJECT" -c Release -o "$OUT_DIR"
+
+            BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            cat <<EOF > "$OUT_DIR/build-info.json"
+            {
+              "app": "$app",
+              "services": "${{ inputs.service_name }}",
+              "commit": "${{ github.sha }}",
+              "branch": "${{ github.ref_name }}",
+              "buildTime": "$BUILD_TIME",
+              "pipeline": "github-actions",
+              "runId": "${{ github.run_id }}"
+            }
+            EOF
           done
 
       # =========================================================
-      # BUILD INFO (PER BACKEND)
-      # =========================================================
-      - name: Generate build-info.json
-        run: |
-          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
-
-          for app in "${APPS[@]}"; do
-            cat <<EOF > $GITHUB_WORKSPACE/publish/$app/build-info.json
-          {
-            "app": "$app",
-            "services": "${{ inputs.service_name }}",
-            "commit": "${{ github.sha }}",
-            "branch": "${{ github.ref_name }}",
-            "buildTime": "$BUILD_TIME",
-            "pipeline": "github-actions",
-            "runId": "${{ github.run_id }}"
-          }
-          EOF
-          done
-
-      # =========================================================
-      # FRONTEND
+      # FRONTEND BUILD
       # =========================================================
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -129,7 +122,7 @@ jobs:
           cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
 
       # =========================================================
-      # SSH
+      # SSH SETUP
       # =========================================================
       - name: Setup SSH
         run: |
@@ -150,8 +143,8 @@ jobs:
             echo "▶ Deploying backend: $app"
             ssh root@$VDS_HOST "mkdir -p $REMOTE_ROOT/backend/$app"
             rsync -avz --delete \
-              $GITHUB_WORKSPACE/publish/$app/ \
-              root@$VDS_HOST:$REMOTE_ROOT/backend/$app/
+              "$GITHUB_WORKSPACE/publish/$app/" \
+              "root@$VDS_HOST:$REMOTE_ROOT/backend/$app/"
           done
 
       # =========================================================
@@ -161,11 +154,11 @@ jobs:
         run: |
           ssh root@$VDS_HOST "mkdir -p $REMOTE_ROOT/frontend"
           rsync -avz --delete \
-            $GITHUB_WORKSPACE/publish/frontend/ \
-            root@$VDS_HOST:$REMOTE_ROOT/frontend/
+            "$GITHUB_WORKSPACE/publish/frontend/" \
+            "root@$VDS_HOST:$REMOTE_ROOT/frontend/"
 
       # =========================================================
-      # SERVICE RESTART (MULTI SERVICE)
+      # SERVICE RESTART
       # =========================================================
       - name: Restart Service(s)
         run: |
