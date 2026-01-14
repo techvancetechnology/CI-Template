@@ -87,6 +87,7 @@ jobs:
             dotnet publish "$PROJECT" -c Release -o "$OUT_DIR"
 
             BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            
             cat <<EOF > "$OUT_DIR/build-info.json"
             {
               "app": "$app",
