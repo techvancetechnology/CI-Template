@@ -29,6 +29,12 @@ on:
         type: string
         default: frontend
 
+      # 🔥 YENİ — MULTI BACKEND DESTEĞİ
+      backend_apps:
+        required: false
+        type: string
+        default: backend
+
     secrets:
       VDS_HOST:
         required: true
@@ -51,18 +57,39 @@ jobs:
         with:
           dotnet-version: 9.0.x
 
-      - name: Build Backend
+      # =========================================================
+      # BACKEND BUILD (SINGLE or MULTI)
+      # =========================================================
+      - name: Build Backend(s)
         run: |
-          cd ${{ inputs.backend_path }}
-          dotnet restore
-          dotnet publish -c Release -o $GITHUB_WORKSPACE/publish/backend
+          set -e
+          IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
 
+          for app in "${APPS[@]}"; do
+            echo "▶ Building backend app: $app"
+
+            APP_PATH="${{ inputs.backend_path }}"
+            if [ "$app" != "backend" ]; then
+              APP_PATH="${{ inputs.backend_path }}/$app"
+            fi
+
+            dotnet restore "$APP_PATH"
+            dotnet publish "$APP_PATH" -c Release -o "$GITHUB_WORKSPACE/publish/$app"
+          done
+
+      # =========================================================
+      # BUILD INFO (PER BACKEND)
+      # =========================================================
       - name: Generate build-info.json
         run: |
           BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          cat <<EOF > $GITHUB_WORKSPACE/publish/backend/build-info.json
+          IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
+
+          for app in "${APPS[@]}"; do
+            cat <<EOF > $GITHUB_WORKSPACE/publish/$app/build-info.json
           {
-            "service": "${{ inputs.service_name }}",
+            "service": "${{ inputs.service_name }}-$app",
+            "app": "$app",
             "commit": "${{ github.sha }}",
             "branch": "${{ github.ref_name }}",
             "buildTime": "$BUILD_TIME",
@@ -70,7 +97,11 @@ jobs:
             "runId": "${{ github.run_id }}"
           }
           EOF
+          done
 
+      # =========================================================
+      # FRONTEND
+      # =========================================================
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
@@ -89,6 +120,9 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/publish/frontend
           cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
 
+      # =========================================================
+      # SSH
+      # =========================================================
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -96,13 +130,25 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.VDS_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Upload Backend
+      # =========================================================
+      # BACKEND DEPLOY (LOOP)
+      # =========================================================
+      - name: Upload Backend(s)
         run: |
-          ssh root@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/backend"
-          rsync -avz --delete \
-            $GITHUB_WORKSPACE/publish/backend/ \
-            root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/
+          set -e
+          IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
 
+          for app in "${APPS[@]}"; do
+            echo "▶ Deploying backend: $app"
+            ssh root@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/backend/$app"
+            rsync -avz --delete \
+              $GITHUB_WORKSPACE/publish/$app/ \
+              root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/$app/
+          done
+
+      # =========================================================
+      # FRONTEND DEPLOY
+      # =========================================================
       - name: Upload Frontend
         run: |
           ssh root@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/frontend"
@@ -110,6 +156,13 @@ jobs:
             $GITHUB_WORKSPACE/publish/frontend/ \
             root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
 
-      - name: Restart Service
+      # =========================================================
+      # SERVICE RESTART (PER BACKEND)
+      # =========================================================
+      - name: Restart Service(s)
         run: |
-          ssh root@${{ secrets.VDS_HOST }} "systemctl restart ${{ inputs.service_name }}"
+          IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
+          for app in "${APPS[@]}"; do
+            ssh root@${{ secrets.VDS_HOST }} \
+              "systemctl restart ${{ inputs.service_name }}-$app.service"
+          done
