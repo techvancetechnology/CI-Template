@@ -61,27 +61,27 @@ jobs:
       # =========================================================
       - name: Build Backend(s)
         run: |
-          set -e
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
           
           for app in "${APPS[@]}"; do
             echo "▶ Building backend: $app"
           
             if [ "$app" = "backend" ]; then
-              PROJECT=$(find "${{ inputs.backend_path }}" -maxdepth 1 -name "*.csproj" | head -n 1)
+              PROJECT=$(find "backend" -maxdepth 1 -name "*.csproj" | head -n 1)
+              OUT_DIR="$GITHUB_WORKSPACE/publish/backend"
             else
-              PROJECT=$(find "${{ inputs.backend_path }}/$app" -maxdepth 1 -name "*.csproj" | head -n 1)
+              PROJECT=$(find "backend/$app" -maxdepth 1 -name "*.csproj" | head -n 1)
+              OUT_DIR="$GITHUB_WORKSPACE/publish/$app"
             fi
           
             if [ -z "$PROJECT" ]; then
-              echo "❌ .csproj not found for backend app: $app"
+              echo "❌ .csproj not found for $app"
               exit 1
             fi
           
             echo "▶ Using project: $PROJECT"
-          
             dotnet restore "$PROJECT"
-            dotnet publish "$PROJECT" -c Release -o "$GITHUB_WORKSPACE/publish/$app"
+            dotnet publish "$PROJECT" -c Release -o "$OUT_DIR"
           done
 
       # =========================================================
