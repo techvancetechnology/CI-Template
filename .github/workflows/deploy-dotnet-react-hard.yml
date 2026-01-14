@@ -30,15 +30,16 @@ on:
         type: string
         default: frontend
 
-      # 🔥 MULTI BACKEND (api,worker,…)
       backend_apps:
         required: false
         type: string
         default: backend
         description: "Comma separated backend folders (api,worker or backend)"
-
-    secrets: inherit
-
+    secrets:
+      VDS_HOST:
+        required: true
+      VDS_SSH_KEY:
+        required: true
 jobs:
   hard-deploy:
     runs-on: ubuntu-latest
