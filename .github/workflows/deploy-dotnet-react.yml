@@ -36,6 +36,12 @@ on:
         default: backend
         description: "Comma separated backend apps (backend,worker)"
 
+      deploy_mode:
+        required: false
+        type: string
+        default: be+fe
+        description: "be | fe | be+fe"
+
     secrets:
       VDS_HOST:
         required: true
@@ -50,18 +56,23 @@ jobs:
       REMOTE_ROOT: ${{ inputs.remote_root_path }}
 
     steps:
+      # =========================================================
+      # CHECKOUT
+      # =========================================================
       - name: Checkout
         uses: actions/checkout@v4
 
+      # =========================================================
+      # BACKEND BUILD
+      # =========================================================
       - name: Setup .NET
+        if: inputs.deploy_mode != 'fe'
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 9.0.x
 
-      # =========================================================
-      # BACKEND BUILD (API + WORKER)
-      # =========================================================
       - name: Build Backend(s)
+        if: inputs.deploy_mode != 'fe'
         run: |
           set -e
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
@@ -113,6 +124,7 @@ jobs:
       # FRONTEND BUILD
       # =========================================================
       - name: Setup Node
+        if: inputs.deploy_mode != 'be'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -120,6 +132,7 @@ jobs:
           cache-dependency-path: ${{ inputs.frontend_path }}/package-lock.json
 
       - name: Build Frontend
+        if: inputs.deploy_mode != 'be'
         env:
           VITE_API_BASE_URL: ${{ inputs.vite_api_base_url }}
           VITE_PUBLIC_BASE_URL: ${{ inputs.vite_public_base_url }}
@@ -135,8 +148,8 @@ jobs:
       # =========================================================
       - name: Setup SSH
         env:
-          VDS_HOST: ${{ secrets.VDS_HOST }}    
-          VDS_SSH_KEY: ${{ secrets.VDS_SSH_KEY }}  
+          VDS_HOST: ${{ secrets.VDS_HOST }}
+          VDS_SSH_KEY: ${{ secrets.VDS_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
           echo "$VDS_SSH_KEY" > ~/.ssh/id_rsa
@@ -144,11 +157,12 @@ jobs:
           ssh-keyscan -H "$VDS_HOST" >> ~/.ssh/known_hosts
 
       # =========================================================
-      # DEPLOY
+      # DEPLOY BACKEND
       # =========================================================
       - name: Upload Backend(s)
+        if: inputs.deploy_mode != 'fe'
         env:
-          VDS_HOST: ${{ secrets.VDS_HOST }}    
+          VDS_HOST: ${{ secrets.VDS_HOST }}
         run: |
           set -e
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
@@ -159,18 +173,26 @@ jobs:
               "root@$VDS_HOST:$REMOTE_ROOT/backend/$app/"
           done
 
+      # =========================================================
+      # DEPLOY FRONTEND
+      # =========================================================
       - name: Upload Frontend
+        if: inputs.deploy_mode != 'be'
         env:
-          VDS_HOST: ${{ secrets.VDS_HOST }}    
+          VDS_HOST: ${{ secrets.VDS_HOST }}
         run: |
           ssh root@$VDS_HOST "mkdir -p $REMOTE_ROOT/frontend"
           rsync -avz --delete \
             "$GITHUB_WORKSPACE/publish/frontend/" \
             "root@$VDS_HOST:$REMOTE_ROOT/frontend/"
 
+      # =========================================================
+      # SERVICE RESTART (BACKEND ONLY)
+      # =========================================================
       - name: Restart Service(s)
+        if: inputs.deploy_mode != 'fe'
         env:
-          VDS_HOST: ${{ secrets.VDS_HOST }}     
+          VDS_HOST: ${{ secrets.VDS_HOST }}
         run: |
           set -e
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
