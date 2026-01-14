@@ -82,23 +82,31 @@ jobs:
               exit 1
             fi
 
-            echo "▶ Using project: $PROJECT"
             dotnet restore "$PROJECT"
             dotnet publish "$PROJECT" -c Release -o "$OUT_DIR"
 
             BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-            
-            cat <<EOF > "$OUT_DIR/build-info.json"
-            {
-              "app": "$app",
-              "services": "notifier-staging.service,notifier-worker-staging.service",
-              "commit": "1c935a38225ec93ccec418a953a88053b74d7b06",
-              "branch": "main",
-              "buildTime": "$BUILD_TIME",
-              "pipeline": "github-actions",
-              "runId": "20987978796"
-            }
-            EOF
+
+            cat > "$OUT_DIR/build-info.json" <<'EOF'
+          {
+            "app": "__APP__",
+            "services": "__SERVICES__",
+            "commit": "__COMMIT__",
+            "branch": "__BRANCH__",
+            "buildTime": "__BUILD_TIME__",
+            "pipeline": "github-actions",
+            "runId": "__RUN_ID__"
+          }
+          EOF
+
+            sed -i \
+              -e "s/__APP__/$app/g" \
+              -e "s#__SERVICES__#${{ inputs.service_name }}#g" \
+              -e "s/__COMMIT__/${{ github.sha }}/g" \
+              -e "s/__BRANCH__/${{ github.ref_name }}/g" \
+              -e "s/__BUILD_TIME__/$BUILD_TIME/g" \
+              -e "s/__RUN_ID__/${{ github.run_id }}/g" \
+              "$OUT_DIR/build-info.json"
           done
 
       # =========================================================
@@ -123,7 +131,7 @@ jobs:
           cp -r dist/* $GITHUB_WORKSPACE/publish/frontend/
 
       # =========================================================
-      # SSH SETUP
+      # SSH
       # =========================================================
       - name: Setup SSH
         run: |
@@ -133,24 +141,19 @@ jobs:
           ssh-keyscan -H "$VDS_HOST" >> ~/.ssh/known_hosts
 
       # =========================================================
-      # BACKEND DEPLOY
+      # DEPLOY
       # =========================================================
       - name: Upload Backend(s)
         run: |
           set -e
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
-
           for app in "${APPS[@]}"; do
-            echo "▶ Deploying backend: $app"
             ssh root@$VDS_HOST "mkdir -p $REMOTE_ROOT/backend/$app"
             rsync -avz --delete \
               "$GITHUB_WORKSPACE/publish/$app/" \
               "root@$VDS_HOST:$REMOTE_ROOT/backend/$app/"
           done
 
-      # =========================================================
-      # FRONTEND DEPLOY
-      # =========================================================
       - name: Upload Frontend
         run: |
           ssh root@$VDS_HOST "mkdir -p $REMOTE_ROOT/frontend"
@@ -158,15 +161,10 @@ jobs:
             "$GITHUB_WORKSPACE/publish/frontend/" \
             "root@$VDS_HOST:$REMOTE_ROOT/frontend/"
 
-      # =========================================================
-      # SERVICE RESTART
-      # =========================================================
       - name: Restart Service(s)
         run: |
           set -e
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
-
           for svc in "${SERVICES[@]}"; do
-            echo "▶ Restarting service: $svc"
             ssh root@$VDS_HOST "systemctl restart $svc"
           done
