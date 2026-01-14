@@ -10,6 +10,7 @@ on:
       service_name:
         required: true
         type: string
+        description: "Comma separated systemd services (e.g. notifier.service,notifier-worker.service)"
 
       vite_api_base_url:
         required: true
@@ -34,12 +35,9 @@ on:
         required: false
         type: string
         default: backend
+        description: "Comma separated backend folders (api,worker or backend)"
 
-    secrets:
-      VDS_HOST:
-        required: true
-      VDS_SSH_KEY:
-        required: true
+    secrets: inherit
 
 jobs:
   hard-deploy:
@@ -50,10 +48,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v3
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 9.0.x
 
@@ -68,8 +66,9 @@ jobs:
           for app in "${APPS[@]}"; do
             echo "▶ Building backend: $app"
 
-            APP_PATH="${{ inputs.backend_path }}"
-            if [ "$app" != "backend" ]; then
+            if [ "$app" = "backend" ]; then
+              APP_PATH="${{ inputs.backend_path }}"
+            else
               APP_PATH="${{ inputs.backend_path }}/$app"
             fi
 
@@ -88,8 +87,8 @@ jobs:
           for app in "${APPS[@]}"; do
             cat <<EOF > $GITHUB_WORKSPACE/publish/$app/build-info.json
           {
-            "service": "${{ inputs.service_name }}-$app",
             "app": "$app",
+            "services": "${{ inputs.service_name }}",
             "commit": "${{ github.sha }}",
             "branch": "${{ github.ref_name }}",
             "buildTime": "$BUILD_TIME",
@@ -103,7 +102,7 @@ jobs:
       # FRONTEND
       # =========================================================
       - name: Setup Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 20
 
@@ -124,27 +123,39 @@ jobs:
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_rsa
+          echo "$VDS_SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.VDS_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H "$VDS_HOST" >> ~/.ssh/known_hosts
 
       # =========================================================
-      # HARD CLEAN (PER BACKEND)
+      # STOP SERVICES (ALL)
       # =========================================================
-      - name: HARD CLEAN remote
+      - name: Stop Service(s)
+        run: |
+          set -e
+          IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
+
+          for svc in "${SERVICES[@]}"; do
+            echo "▶ Stopping service: $svc"
+            ssh root@$VDS_HOST "systemctl stop $svc || true"
+          done
+
+      # =========================================================
+      # HARD CLEAN (BACKEND + FRONTEND)
+      # =========================================================
+      - name: HARD CLEAN remote filesystem
         run: |
           set -e
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
 
           for app in "${APPS[@]}"; do
-            ssh root@${{ secrets.VDS_HOST }} "
-              systemctl stop ${{ inputs.service_name }}-$app.service || true
+            ssh root@$VDS_HOST "
               mkdir -p $REMOTE_ROOT/backend/$app
               rm -rf $REMOTE_ROOT/backend/$app/*
             "
           done
 
-          ssh root@${{ secrets.VDS_HOST }} "
+          ssh root@$VDS_HOST "
             mkdir -p $REMOTE_ROOT/frontend
             rm -rf $REMOTE_ROOT/frontend/*
           "
@@ -161,7 +172,7 @@ jobs:
             echo "▶ Uploading backend: $app"
             rsync -avz \
               $GITHUB_WORKSPACE/publish/$app/ \
-              root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/backend/$app/
+              root@$VDS_HOST:$REMOTE_ROOT/backend/$app/
           done
 
       # =========================================================
@@ -171,15 +182,17 @@ jobs:
         run: |
           rsync -avz \
             $GITHUB_WORKSPACE/publish/frontend/ \
-            root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/
+            root@$VDS_HOST:$REMOTE_ROOT/frontend/
 
       # =========================================================
-      # START SERVICES (PER BACKEND)
+      # START SERVICES (ALL)
       # =========================================================
       - name: Start Service(s)
         run: |
-          IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
-          for app in "${APPS[@]}"; do
-            ssh root@${{ secrets.VDS_HOST }} \
-              "systemctl start ${{ inputs.service_name }}-$app.service"
+          set -e
+          IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
+
+          for svc in "${SERVICES[@]}"; do
+            echo "▶ Starting service: $svc"
+            ssh root@$VDS_HOST "systemctl start $svc"
           done
