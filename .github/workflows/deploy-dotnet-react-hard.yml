@@ -170,5 +170,5 @@ jobs:
         run: |
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
           for svc in "${SERVICES[@]}"; do
-            ssh github@${{ secrets.VDS_HOST }} "systemctl start $svc"
+            ssh github@${{ secrets.VDS_HOST }} "sudo systemctl start $svc"
           done
