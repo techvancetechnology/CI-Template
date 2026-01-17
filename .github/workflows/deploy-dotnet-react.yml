@@ -129,19 +129,19 @@ jobs:
         run: |
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
           for app in "${APPS[@]}"; do
-            ssh root@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/$app"
+            ssh github@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/$app"
             rsync -avz --delete \
               "$GITHUB_WORKSPACE/publish/$app/" \
-              "root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/$app/"
+              "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/$app/"
           done
 
       - name: Upload Frontend
         if: inputs.deploy_mode != 'be'
         run: |
-          ssh root@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/frontend"
+          ssh github@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/frontend"
           rsync -avz --delete \
             "$GITHUB_WORKSPACE/publish/frontend/" \
-            "root@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/"
+            "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/"
 
       # =========================
       # RESTART
@@ -151,5 +151,5 @@ jobs:
         run: |
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
           for svc in "${SERVICES[@]}"; do
-            ssh root@${{ secrets.VDS_HOST }} "systemctl restart $svc"
+            ssh github@${{ secrets.VDS_HOST }} "systemctl restart $svc"
           done
