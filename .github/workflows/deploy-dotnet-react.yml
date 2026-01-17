@@ -130,7 +130,11 @@ jobs:
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
           for app in "${APPS[@]}"; do
             ssh github@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/$app"
-            rsync -avz --delete \
+            rsync -rz --delete \
+              --no-times \
+              --no-perms \
+              --no-owner \
+              --no-group \
               "$GITHUB_WORKSPACE/publish/$app/" \
               "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/$app/"
           done
@@ -139,9 +143,13 @@ jobs:
         if: inputs.deploy_mode != 'be'
         run: |
           ssh github@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/frontend"
-          rsync -avz --delete \
-            "$GITHUB_WORKSPACE/publish/frontend/" \
-            "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/"
+          rsync -rz --delete \
+          --no-times \
+          --no-perms \
+          --no-owner \
+          --no-group \
+          "$GITHUB_WORKSPACE/publish/frontend/" \
+          "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/"
 
       # =========================
       # RESTART
