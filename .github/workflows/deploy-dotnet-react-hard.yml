@@ -122,7 +122,7 @@ jobs:
         run: |
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
           for svc in "${SERVICES[@]}"; do
-            ssh root@${{ secrets.VDS_HOST }} "systemctl stop $svc || true"
+            ssh github@${{ secrets.VDS_HOST }} "systemctl stop $svc || true"
           done
 
       # =========================
@@ -130,7 +130,7 @@ jobs:
       # =========================
       - name: Clean Remote FS
         run: |
-          ssh root@${{ secrets.VDS_HOST }} "rm -rf $REMOTE_ROOT/* || true"
+          ssh github@${{ secrets.VDS_HOST }} "rm -rf $REMOTE_ROOT/* || true"
 
       # =========================
       # UPLOAD (HARD)
