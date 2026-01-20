@@ -165,10 +165,19 @@ jobs:
       # =========================
       # START
       # =========================
-      - name: Start Services
+      - name: Restart Service(s)
         if: inputs.deploy_mode != 'fe'
         run: |
+          set -e
+      
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
+      
           for svc in "${SERVICES[@]}"; do
-            ssh github@${{ secrets.VDS_HOST }} "sudo systemctl start $svc"
+            echo "Restarting service: $svc"
+      
+            ssh \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=no \
+              github@${{ secrets.VDS_HOST }} \
+              "sudo systemctl restart $svc && sudo systemctl is-active --quiet $svc"
           done
