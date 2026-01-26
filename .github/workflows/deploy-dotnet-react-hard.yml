@@ -34,10 +34,24 @@ on:
         type: string
         default: backend
 
+      # ✅ NEW – node worker support
+      node_apps:
+        required: false
+        type: string
+        default: ""
+        description: "Comma separated node app folders (e.g. puppeteer-worker)"
+
+      node_path:
+        required: false
+        type: string
+        default: "."
+        description: "Base path for node apps"
+
       deploy_mode:
         required: false
         type: string
         default: be+fe
+        description: "be | fe | be+fe | be+node | fe+node | be+fe+node | node"
 
     secrets:
       VDS_HOST:
@@ -59,12 +73,12 @@ jobs:
       # BACKEND
       # =========================
       - uses: actions/setup-dotnet@v4
-        if: inputs.deploy_mode != 'fe'
+        if: inputs.deploy_mode != 'fe' && inputs.deploy_mode != 'node'
         with:
           dotnet-version: 9.0.x
 
       - name: Build Backend(s)
-        if: inputs.deploy_mode != 'fe'
+        if: inputs.deploy_mode != 'fe' && inputs.deploy_mode != 'node'
         run: |
           set -e
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
@@ -85,15 +99,51 @@ jobs:
           done
 
       # =========================
-      # FRONTEND
+      # NODE (FRONTEND + WORKER)
       # =========================
       - uses: actions/setup-node@v4
         if: inputs.deploy_mode != 'be'
         with:
           node-version: 20
 
+      - name: Build Node Worker(s)
+        if: inputs.node_apps != '' && (contains(inputs.deploy_mode, 'node') || inputs.deploy_mode == 'node')
+        run: |
+          set -e
+          IFS=',' read -ra APPS <<< "${{ inputs.node_apps }}"
+
+          for app in "${APPS[@]}"; do
+            APP_PATH="${{ inputs.node_path }}/${app}"
+            [ ! -d "$APP_PATH" ] && echo "❌ node app folder not found: $APP_PATH" && exit 1
+
+            cd "$APP_PATH"
+
+            if [ -f package-lock.json ]; then
+              npm ci
+            else
+              npm install
+            fi
+
+            if npm run | grep -qE ' build'; then
+              npm run build
+            fi
+
+            mkdir -p "$GITHUB_WORKSPACE/publish/$app"
+            rsync -rz \
+              --exclude node_modules \
+              --exclude .git \
+              --exclude .github \
+              --exclude publish \
+              ./ "$GITHUB_WORKSPACE/publish/$app/"
+
+            cd "$GITHUB_WORKSPACE"
+          done
+
+      # =========================
+      # FRONTEND
+      # =========================
       - name: Build Frontend
-        if: inputs.deploy_mode != 'be'
+        if: inputs.deploy_mode != 'be' && inputs.deploy_mode != 'node'
         env:
           VITE_API_BASE_URL: ${{ inputs.vite_api_base_url }}
           VITE_PUBLIC_BASE_URL: ${{ inputs.vite_public_base_url }}
@@ -115,7 +165,7 @@ jobs:
           ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts
 
       # =========================
-      # STOP
+      # STOP SERVICES
       # =========================
       - name: Stop Services
         if: inputs.deploy_mode != 'fe'
@@ -136,7 +186,7 @@ jobs:
       # UPLOAD (HARD)
       # =========================
       - name: Upload Backend(s)
-        if: inputs.deploy_mode != 'fe'
+        if: inputs.deploy_mode != 'fe' && inputs.deploy_mode != 'node'
         run: |
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
           for app in "${APPS[@]}"; do
@@ -150,8 +200,23 @@ jobs:
               "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/$app/"
           done
 
+      - name: Upload Node App(s)
+        if: inputs.node_apps != '' && (contains(inputs.deploy_mode, 'node') || inputs.deploy_mode == 'node')
+        run: |
+          IFS=',' read -ra APPS <<< "${{ inputs.node_apps }}"
+          for app in "${APPS[@]}"; do
+            ssh github@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/$app"
+            rsync -rz \
+              --no-times \
+              --no-perms \
+              --no-owner \
+              --no-group \
+              "$GITHUB_WORKSPACE/publish/$app/" \
+              "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/$app/"
+          done
+
       - name: Upload Frontend
-        if: inputs.deploy_mode != 'be'
+        if: inputs.deploy_mode != 'be' && inputs.deploy_mode != 'node'
         run: |
           ssh github@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/frontend"
           rsync -rz \
@@ -163,18 +228,14 @@ jobs:
             "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/"
 
       # =========================
-      # START
+      # START SERVICES
       # =========================
       - name: Restart Service(s)
         if: inputs.deploy_mode != 'fe'
         run: |
           set -e
-      
           IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
-      
           for svc in "${SERVICES[@]}"; do
-            echo "Restarting service: $svc"
-      
             ssh \
               -o IdentitiesOnly=yes \
               -o StrictHostKeyChecking=no \
