@@ -35,11 +35,24 @@ on:
         type: string
         default: backend
 
+      # ✅ NEW (node worker build+upload için)
+      node_apps:
+        required: false
+        type: string
+        default: ""
+        description: "Comma separated node app folders (e.g. puppeteer-worker). Empty disables node steps."
+
+      node_path:
+        required: false
+        type: string
+        default: "."
+        description: "Base path for node apps (repo root by default)."
+
       deploy_mode:
         required: false
         type: string
         default: be+fe
-        description: "be | fe | be+fe"
+        description: "be | fe | be+fe | be+node | fe+node | be+fe+node | node"
 
     secrets:
       VDS_HOST:
@@ -62,13 +75,13 @@ jobs:
       # BACKEND
       # =========================
       - name: Setup .NET
-        if: inputs.deploy_mode != 'fe'
+        if: inputs.deploy_mode != 'fe' && inputs.deploy_mode != 'node'
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 9.0.x
 
       - name: Build Backend(s)
-        if: inputs.deploy_mode != 'fe'
+        if: inputs.deploy_mode != 'fe' && inputs.deploy_mode != 'node'
         run: |
           set -e
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
@@ -89,9 +102,9 @@ jobs:
           done
 
       # =========================
-      # FRONTEND
+      # NODE WORKER (NEW)
       # =========================
-      - name: Setup Node
+      - name: Setup Node (for FE and/or Node apps)
         if: inputs.deploy_mode != 'be'
         uses: actions/setup-node@v4
         with:
@@ -99,8 +112,46 @@ jobs:
           cache: npm
           cache-dependency-path: ${{ inputs.frontend_path }}/package-lock.json
 
+      - name: Build Node App(s)
+        if: inputs.node_apps != '' && (contains(inputs.deploy_mode, 'node') || inputs.deploy_mode == 'node')
+        run: |
+          set -e
+          IFS=',' read -ra APPS <<< "${{ inputs.node_apps }}"
+
+          for app in "${APPS[@]}"; do
+            APP_PATH="${{ inputs.node_path }}/${app}"
+            [ ! -d "$APP_PATH" ] && echo "❌ node app folder not found: $APP_PATH" && exit 1
+
+            cd "$APP_PATH"
+
+            # lock file kontrolü
+            if [ -f package-lock.json ]; then
+              npm ci
+            else
+              npm install
+            fi
+
+            # build script varsa çalıştır
+            if npm run | grep -qE ' build'; then
+              npm run build
+            fi
+
+            mkdir -p "$GITHUB_WORKSPACE/publish/$app"
+            rsync -rz --delete \
+              --exclude node_modules \
+              --exclude .git \
+              --exclude .github \
+              --exclude publish \
+              ./ "$GITHUB_WORKSPACE/publish/$app/"
+
+            cd "$GITHUB_WORKSPACE"
+          done
+
+      # =========================
+      # FRONTEND
+      # =========================
       - name: Build Frontend
-        if: inputs.deploy_mode != 'be'
+        if: inputs.deploy_mode != 'be' && inputs.deploy_mode != 'node'
         env:
           VITE_API_BASE_URL: ${{ inputs.vite_api_base_url }}
           VITE_PUBLIC_BASE_URL: ${{ inputs.vite_public_base_url }}
@@ -122,10 +173,10 @@ jobs:
           ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts
 
       # =========================
-      # UPLOAD
+      # UPLOAD (UNCHANGED)
       # =========================
       - name: Upload Backend(s)
-        if: inputs.deploy_mode != 'fe'
+        if: inputs.deploy_mode != 'fe' && inputs.deploy_mode != 'node'
         run: |
           IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
           for app in "${APPS[@]}"; do
@@ -140,7 +191,7 @@ jobs:
           done
 
       - name: Upload Frontend
-        if: inputs.deploy_mode != 'be'
+        if: inputs.deploy_mode != 'be' && inputs.deploy_mode != 'node'
         run: |
           ssh github@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/frontend"
           rsync -rz --delete \
@@ -151,8 +202,24 @@ jobs:
           "$GITHUB_WORKSPACE/publish/frontend/" \
           "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/frontend/"
 
+      # ✅ NEW upload (pattern backend upload ile aynı; mevcutları bozmaz)
+      - name: Upload Node App(s)
+        if: inputs.node_apps != '' && (contains(inputs.deploy_mode, 'node') || inputs.deploy_mode == 'node')
+        run: |
+          IFS=',' read -ra APPS <<< "${{ inputs.node_apps }}"
+          for app in "${APPS[@]}"; do
+            ssh github@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT/$app"
+            rsync -rz --delete \
+              --no-times \
+              --no-perms \
+              --no-owner \
+              --no-group \
+              "$GITHUB_WORKSPACE/publish/$app/" \
+              "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/$app/"
+          done
+
       # =========================
-      # RESTART
+      # RESTART (UNCHANGED)
       # =========================
       - name: Restart Service(s)
         if: inputs.deploy_mode != 'fe'
