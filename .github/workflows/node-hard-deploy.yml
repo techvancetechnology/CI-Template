@@ -23,7 +23,7 @@ on:
         required: true
 
 jobs:
-  deploy-node-hard:
+  Hard:
     runs-on: ubuntu-latest
 
     env:
