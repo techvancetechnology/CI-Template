@@ -1,0 +1,106 @@
+name: Reusable Backend Deploy (BE Hard – Single App)
+
+on:
+  workflow_call:
+    inputs:
+      remote_root_path:
+        required: true
+        type: string
+
+      service_name:
+        required: true
+        type: string
+
+      backend_path:
+        required: false
+        type: string
+        default: backend
+
+    secrets:
+      VDS_HOST:
+        required: true
+      VDS_SSH_KEY:
+        required: true
+
+jobs:
+  deploy-be-hard:
+    runs-on: ubuntu-latest
+
+    env:
+      REMOTE_ROOT: ${{ inputs.remote_root_path }}
+
+    steps:
+      # =========================
+      # CHECKOUT
+      # =========================
+      - uses: actions/checkout@v4
+
+      # =========================
+      # DOTNET
+      # =========================
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      # =========================
+      # BUILD
+      # =========================
+      - name: Build Backend
+        run: |
+          set -e
+
+          PROJECT=$(find "${{ inputs.backend_path }}" -maxdepth 3 -name "*.csproj" | head -n 1)
+          [ -z "$PROJECT" ] && echo "❌ csproj not found" && exit 1
+
+          dotnet restore "$PROJECT"
+          dotnet publish "$PROJECT" -c Release -o "$GITHUB_WORKSPACE/publish/backend"
+
+      # =========================
+      # SSH
+      # =========================
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -R "${{ secrets.VDS_HOST }}" || true
+          ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts
+
+      # =========================
+      # STOP SERVICE
+      # =========================
+      - name: Stop Service
+        run: |
+          ssh github@${{ secrets.VDS_HOST }} \
+            "sudo systemctl stop ${{ inputs.service_name }} || true"
+
+      # =========================
+      # CLEAN REMOTE
+      # =========================
+      - name: Clean Remote Directory
+        run: |
+          ssh github@${{ secrets.VDS_HOST }} "rm -rf $REMOTE_ROOT || true"
+
+      # =========================
+      # UPLOAD (HARD)
+      # =========================
+      - name: Upload Backend
+        run: |
+          ssh github@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT"
+
+          rsync -rz \
+            --no-times \
+            --no-perms \
+            --no-owner \
+            --no-group \
+            "$GITHUB_WORKSPACE/publish/backend/" \
+            "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/"
+
+      # =========================
+      # START SERVICE
+      # =========================
+      - name: Start Service
+        run: |
+          ssh github@${{ secrets.VDS_HOST }} \
+            "sudo systemctl restart ${{ inputs.service_name }} &&
+             sudo systemctl is-active --quiet ${{ inputs.service_name }}"
