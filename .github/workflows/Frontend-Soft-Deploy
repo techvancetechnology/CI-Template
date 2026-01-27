@@ -1,0 +1,115 @@
+name: Reusable Frontend Deploy (FE Soft)
+
+on:
+  workflow_call:
+    inputs:
+      remote_root_path:
+        required: true
+        type: string
+
+      vite_api_base_url:
+        required: true
+        type: string
+
+      vite_public_base_url:
+        required: true
+        type: string
+
+      frontend_path:
+        required: false
+        type: string
+        default: frontend
+        description: "Local frontend path in repo"
+
+      frontend_remote_path:
+        required: false
+        type: string
+        default: frontend
+        description: "Remote frontend folder under remote_root_path"
+
+    secrets:
+      VDS_HOST:
+        required: true
+      VDS_SSH_KEY:
+        required: true
+
+jobs:
+  deploy-fe:
+    runs-on: ubuntu-latest
+
+    env:
+      REMOTE_ROOT: ${{ inputs.remote_root_path }}
+
+    steps:
+      # =========================
+      # CHECKOUT
+      # =========================
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # =========================
+      # NODE
+      # =========================
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.11.1
+          cache: npm
+          cache-dependency-path: ${{ inputs.frontend_path }}/package-lock.json
+
+      # =========================
+      # BUILD FRONTEND
+      # =========================
+      - name: Build Frontend
+        env:
+          VITE_API_BASE_URL: ${{ inputs.vite_api_base_url }}
+          VITE_PUBLIC_BASE_URL: ${{ inputs.vite_public_base_url }}
+        run: |
+          set -e
+
+          echo "Frontend path: ${{ inputs.frontend_path }}"
+          cd "${{ inputs.frontend_path }}"
+
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+          npm run build
+
+          [ ! -d dist ] && echo "dist folder not found" && exit 1
+
+          rm -rf "$GITHUB_WORKSPACE/publish/frontend"
+          mkdir -p "$GITHUB_WORKSPACE/publish/frontend"
+          cp -r dist/* "$GITHUB_WORKSPACE/publish/frontend/"
+
+      # =========================
+      # SSH
+      # =========================
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          ssh-keygen -R "${{ secrets.VDS_HOST }}" || true
+          ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts
+
+      # =========================
+      # UPLOAD FRONTEND (SOFT)
+      # =========================
+      - name: Upload Frontend
+        run: |
+          echo "Uploading frontend to $REMOTE_ROOT/${{ inputs.frontend_remote_path }}"
+
+          ssh github@${{ secrets.VDS_HOST }} \
+            "mkdir -p $REMOTE_ROOT/${{ inputs.frontend_remote_path }}"
+
+          rsync -rz --delete \
+            --no-times \
+            --no-perms \
+            --no-owner \
+            --no-group \
+            "$GITHUB_WORKSPACE/publish/frontend/" \
+            "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/${{ inputs.frontend_remote_path }}/"
