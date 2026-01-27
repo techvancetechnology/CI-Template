@@ -23,7 +23,7 @@ on:
         required: true
 
 jobs:
-  deploy-be-hard:
+  Hard:
     runs-on: ubuntu-latest
 
     env:
