@@ -53,7 +53,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20.11.1
+          node-version: 20.20
           cache: npm
           cache-dependency-path: ${{ inputs.frontend_path }}/package-lock.json
 
