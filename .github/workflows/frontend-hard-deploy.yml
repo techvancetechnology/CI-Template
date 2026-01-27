@@ -34,7 +34,7 @@ on:
         required: true
 
 jobs:
-  Frontend:
+  Hard:
     runs-on: ubuntu-latest
 
     env:
