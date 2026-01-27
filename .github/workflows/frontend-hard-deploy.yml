@@ -34,7 +34,7 @@ on:
         required: true
 
 jobs:
-  deploy-fe-hard:
+  Frontend:
     runs-on: ubuntu-latest
 
     env:
