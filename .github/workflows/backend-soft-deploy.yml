@@ -1,0 +1,126 @@
+name: Reusable Backend Deploy (BE Soft)
+
+on:
+  workflow_call:
+    inputs:
+      remote_root_path:
+        required: true
+        type: string
+        description: "Remote root directory for backend apps"
+
+      service_name:
+        required: true
+        type: string
+        description: "Comma separated systemd services to restart"
+
+      backend_path:
+        required: false
+        type: string
+        default: backend
+        description: "Default backend source path"
+
+      backend_apps:
+        required: false
+        type: string
+        default: backend
+        description: "Comma separated backend app folders"
+
+    secrets:
+      VDS_HOST:
+        required: true
+      VDS_SSH_KEY:
+        required: true
+
+jobs:
+  deploy-backend:
+    runs-on: ubuntu-latest
+
+    env:
+      REMOTE_ROOT: ${{ inputs.remote_root_path }}
+
+    steps:
+      # =========================
+      # CHECKOUT
+      # =========================
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # =========================
+      # DOTNET
+      # =========================
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      # =========================
+      # BUILD BACKEND(S)
+      # =========================
+      - name: Build Backend Apps
+        run: |
+          set -e
+          IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
+
+          for app in "${APPS[@]}"; do
+            app="$(echo "$app" | xargs)"
+
+            if [ "$app" = "backend" ]; then
+              PROJECT=$(find "${{ inputs.backend_path }}" -maxdepth 3 -name "*.csproj" | head -n 1)
+              OUT="$GITHUB_WORKSPACE/publish/backend"
+            else
+              PROJECT=$(find "$app" -maxdepth 3 -name "*.csproj" | head -n 1)
+              OUT="$GITHUB_WORKSPACE/publish/$app"
+            fi
+
+            [ -z "$PROJECT" ] && echo "❌ csproj not found for $app" && exit 1
+
+            echo "🔨 Building $PROJECT"
+            dotnet restore "$PROJECT"
+            dotnet publish "$PROJECT" -c Release -o "$OUT"
+          done
+
+      # =========================
+      # SSH
+      # =========================
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -R "${{ secrets.VDS_HOST }}" || true
+          ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts
+
+      # =========================
+      # UPLOAD BACKEND(S)
+      # =========================
+      - name: Upload Backend Apps
+        run: |
+          IFS=',' read -ra APPS <<< "${{ inputs.backend_apps }}"
+          for app in "${APPS[@]}"; do
+            app="$(echo "$app" | xargs)"
+
+            ssh github@${{ secrets.VDS_HOST }} \
+              "mkdir -p $REMOTE_ROOT/$app"
+
+            rsync -rz --delete \
+              --no-times \
+              --no-perms \
+              --no-owner \
+              --no-group \
+              "$GITHUB_WORKSPACE/publish/$app/" \
+              "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/$app/"
+          done
+
+      # =========================
+      # RESTART SERVICES
+      # =========================
+      - name: Restart Backend Services
+        run: |
+          set -e
+          IFS=',' read -ra SERVICES <<< "${{ inputs.service_name }}"
+          for svc in "${SERVICES[@]}"; do
+            svc="$(echo "$svc" | xargs)"
+            echo "🔁 Restarting $svc"
+            ssh github@${{ secrets.VDS_HOST }} \
+              "sudo systemctl restart $svc && sudo systemctl is-active --quiet $svc"
+          done
