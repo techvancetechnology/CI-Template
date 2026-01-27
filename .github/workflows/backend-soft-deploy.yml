@@ -26,7 +26,7 @@ on:
         required: true
 
 jobs:
-  deploy-be-soft:
+  Soft:
     runs-on: ubuntu-latest
 
     env:
