@@ -1,0 +1,122 @@
+name: Reusable Node Deploy (Node Hard – Single App)
+
+on:
+  workflow_call:
+    inputs:
+      remote_root_path:
+        required: true
+        type: string
+
+      service_name:
+        required: true
+        type: string
+
+      node_path:
+        required: false
+        type: string
+        default: .
+
+    secrets:
+      VDS_HOST:
+        required: true
+      VDS_SSH_KEY:
+        required: true
+
+jobs:
+  deploy-node-hard:
+    runs-on: ubuntu-latest
+
+    env:
+      REMOTE_ROOT: ${{ inputs.remote_root_path }}
+
+    steps:
+      # =========================
+      # CHECKOUT
+      # =========================
+      - uses: actions/checkout@v4
+
+      # =========================
+      # NODE
+      # =========================
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ${{ inputs.node_path }}/package-lock.json
+
+      # =========================
+      # BUILD
+      # =========================
+      - name: Build Node App
+        run: |
+          set -e
+          cd "${{ inputs.node_path }}"
+
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+          if npm run | grep -qE ' build'; then
+            npm run build
+          fi
+
+          rm -rf "$GITHUB_WORKSPACE/publish/node"
+          mkdir -p "$GITHUB_WORKSPACE/publish/node"
+
+          rsync -rz \
+            --exclude node_modules \
+            --exclude .git \
+            --exclude .github \
+            ./ "$GITHUB_WORKSPACE/publish/node/"
+
+      # =========================
+      # SSH
+      # =========================
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -R "${{ secrets.VDS_HOST }}" || true
+          ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts
+
+      # =========================
+      # STOP SERVICE
+      # =========================
+      - name: Stop Service
+        run: |
+          ssh github@${{ secrets.VDS_HOST }} \
+            "sudo systemctl stop ${{ inputs.service_name }} || true"
+
+      # =========================
+      # CLEAN REMOTE
+      # =========================
+      - name: Clean Remote Directory
+        run: |
+          ssh github@${{ secrets.VDS_HOST }} "rm -rf $REMOTE_ROOT || true"
+
+      # =========================
+      # UPLOAD (HARD)
+      # =========================
+      - name: Upload Node App
+        run: |
+          ssh github@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT"
+
+          rsync -rz \
+            --no-times \
+            --no-perms \
+            --no-owner \
+            --no-group \
+            "$GITHUB_WORKSPACE/publish/node/" \
+            "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/"
+
+      # =========================
+      # START SERVICE
+      # =========================
+      - name: Start Service
+        run: |
+          ssh github@${{ secrets.VDS_HOST }} \
+            "sudo systemctl restart ${{ inputs.service_name }} &&
+             sudo systemctl is-active --quiet ${{ inputs.service_name }}"
