@@ -51,8 +51,6 @@ jobs:
           set -e
           npm ci
           npm run build
-          echo "--- build output directories ---"
-          ls -la | grep -E "^d|out|\.next"
           [ -d out ] || { echo "❌ out/ directory missing after build"; exit 1; }
 
       # =========================
