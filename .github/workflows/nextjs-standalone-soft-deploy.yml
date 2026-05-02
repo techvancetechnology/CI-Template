@@ -1,0 +1,161 @@
+name: Reusable Next.js Standalone Deploy (Soft)
+
+on:
+  workflow_call:
+    inputs:
+      remote_root_path:
+        required: true
+        type: string
+        description: "Remote directory where the standalone artifact lives"
+
+      service_name:
+        required: true
+        type: string
+        description: "systemd service name for the Next.js app"
+
+      migrate_service_name:
+        required: true
+        type: string
+        description: "systemd one-shot service that runs prisma migrate deploy"
+
+      health_check_port:
+        required: false
+        type: number
+        default: 3010
+        description: "Loopback port to curl after restart"
+
+      health_check_path:
+        required: false
+        type: string
+        default: /login
+        description: "Path to request for health check"
+
+      backup_env_file:
+        required: false
+        type: string
+        default: ""
+        description: "Absolute path to the env file on VDS for backup script (leave empty to skip)"
+
+      backup_dir:
+        required: false
+        type: string
+        default: ""
+        description: "Absolute path to backup destination on VDS (leave empty to skip)"
+
+      node_version:
+        required: false
+        type: string
+        default: "22"
+
+    secrets:
+      VDS_HOST:
+        required: true
+      VDS_SSH_KEY:
+        required: true
+
+jobs:
+  Soft:
+    runs-on: ubuntu-latest
+
+    env:
+      REMOTE_ROOT: ${{ inputs.remote_root_path }}
+
+    steps:
+      # =========================
+      # CHECKOUT
+      # =========================
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # =========================
+      # NODE
+      # =========================
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # =========================
+      # BUILD (standalone)
+      # =========================
+      - name: Build Next.js standalone artifact
+        run: |
+          set -e
+          npm ci
+          npm run build:vds
+          [ -f .next/standalone/server.js ] || { echo "❌ .next/standalone/server.js missing"; exit 1; }
+
+      # =========================
+      # STAGE ARTIFACT
+      # =========================
+      - name: Stage publish directory
+        run: |
+          set -e
+          rm -rf "$GITHUB_WORKSPACE/publish"
+          mkdir -p "$GITHUB_WORKSPACE/publish"
+
+          # Standalone runtime (server.js, minimal node_modules, .next/)
+          cp -r .next/standalone/. "$GITHUB_WORKSPACE/publish/"
+
+          # Prisma config needed by migration service (prisma.config.ts at working dir root)
+          [ -f prisma.config.ts ] && cp prisma.config.ts "$GITHUB_WORKSPACE/publish/"
+
+          # Deploy scripts (backup, wait-for-postgres, etc.) uploaded fresh each time
+          mkdir -p "$GITHUB_WORKSPACE/publish/deploy"
+          cp -r deploy/. "$GITHUB_WORKSPACE/publish/deploy/"
+
+      # =========================
+      # SSH
+      # =========================
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -R "${{ secrets.VDS_HOST }}" || true
+          ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts
+
+      # =========================
+      # PRE-MIGRATION BACKUP
+      # =========================
+      - name: Pre-migration backup
+        if: ${{ inputs.backup_env_file != '' && inputs.backup_dir != '' }}
+        run: |
+          ssh github@${{ secrets.VDS_HOST }} \
+            "ENV_FILE=${{ inputs.backup_env_file }} BACKUP_DIR=${{ inputs.backup_dir }} $REMOTE_ROOT/deploy/scripts/backup-postgres.sh"
+
+      # =========================
+      # UPLOAD (SOFT)
+      # =========================
+      - name: Upload standalone artifact
+        run: |
+          ssh github@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT"
+
+          rsync -rz --delete \
+            --no-times \
+            --no-perms \
+            --no-owner \
+            --no-group \
+            "$GITHUB_WORKSPACE/publish/" \
+            "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/"
+
+      # =========================
+      # MIGRATE
+      # =========================
+      - name: Run database migrations
+        run: |
+          ssh github@${{ secrets.VDS_HOST }} \
+            "sudo systemctl start ${{ inputs.migrate_service_name }} && \
+             sudo systemctl status ${{ inputs.migrate_service_name }} --no-pager"
+
+      # =========================
+      # RESTART + HEALTH CHECK
+      # =========================
+      - name: Restart service and verify
+        run: |
+          ssh github@${{ secrets.VDS_HOST }} \
+            "sudo systemctl restart ${{ inputs.service_name }} && \
+             sudo systemctl is-active --quiet ${{ inputs.service_name }} && \
+             curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:${{ inputs.health_check_port }}${{ inputs.health_check_path }} | grep -q 200"
