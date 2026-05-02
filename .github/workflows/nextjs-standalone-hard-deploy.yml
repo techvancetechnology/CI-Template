@@ -87,12 +87,6 @@ jobs:
 
           cp -r .next/standalone/. "$GITHUB_WORKSPACE/publish/"
 
-          # Prisma CLI + config packages: standalone excludes devDeps, but
-          # prisma.config.ts → prisma/config → @prisma/config must all resolve.
-          # Copying from project node_modules keeps the artifact self-contained.
-          cp -r node_modules/prisma "$GITHUB_WORKSPACE/publish/node_modules/"
-          cp -r node_modules/@prisma/config "$GITHUB_WORKSPACE/publish/node_modules/@prisma/"
-
           # Prisma schema + migrations + config needed by migration service
           [ -d prisma ] && cp -r prisma "$GITHUB_WORKSPACE/publish/"
           [ -f prisma.config.ts ] && cp prisma.config.ts "$GITHUB_WORKSPACE/publish/"
