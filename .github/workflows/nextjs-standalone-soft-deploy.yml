@@ -84,6 +84,7 @@ jobs:
         run: |
           set -e
           npm ci
+          npx prisma generate
           npm run build:vds
           [ -f .next/standalone/server.js ] || { echo "❌ .next/standalone/server.js missing"; exit 1; }
 
