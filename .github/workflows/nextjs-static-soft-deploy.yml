@@ -1,0 +1,81 @@
+name: Reusable Next.js Static Deploy (Soft)
+
+on:
+  workflow_call:
+    inputs:
+      remote_root_path:
+        required: true
+        type: string
+        description: "Remote directory where the static files live (served by Nginx)"
+
+      node_version:
+        required: false
+        type: string
+        default: "22"
+
+    secrets:
+      VDS_HOST:
+        required: true
+      VDS_SSH_KEY:
+        required: true
+
+jobs:
+  Soft:
+    runs-on: ubuntu-latest
+
+    env:
+      REMOTE_ROOT: ${{ inputs.remote_root_path }}
+
+    steps:
+      # =========================
+      # CHECKOUT
+      # =========================
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # =========================
+      # NODE
+      # =========================
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # =========================
+      # BUILD (static export)
+      # =========================
+      - name: Build Next.js static export
+        run: |
+          set -e
+          npm ci
+          npm run build
+          [ -d out ] || { echo "❌ out/ directory missing after build"; exit 1; }
+
+      # =========================
+      # SSH
+      # =========================
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -l -f ~/.ssh/id_rsa
+          ssh-keygen -R "${{ secrets.VDS_HOST }}" || true
+          ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts
+
+      # =========================
+      # UPLOAD (SOFT)
+      # =========================
+      - name: Upload static artifact
+        run: |
+          ssh github@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT"
+
+          rsync -rlz --delete \
+            --no-times \
+            --no-perms \
+            --no-owner \
+            --no-group \
+            out/ \
+            "github@${{ secrets.VDS_HOST }}:$REMOTE_ROOT/"
