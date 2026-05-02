@@ -157,7 +157,16 @@ jobs:
       # =========================
       - name: Restart service and verify
         run: |
-          ssh github@${{ secrets.VDS_HOST }} \
-            "sudo systemctl restart ${{ inputs.service_name }} && \
-             sudo systemctl is-active --quiet ${{ inputs.service_name }} && \
-             curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:${{ inputs.health_check_port }}${{ inputs.health_check_path }} | grep -q 200"
+          ssh github@${{ secrets.VDS_HOST }} "
+            set -e
+            sudo systemctl restart ${{ inputs.service_name }}
+            sudo systemctl is-active --quiet ${{ inputs.service_name }}
+            for i in \$(seq 1 15); do
+              code=\$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:${{ inputs.health_check_port }}${{ inputs.health_check_path }} 2>/dev/null || echo 000)
+              [ \"\$code\" = '200' ] && echo 'Health check passed (attempt '\$i')' && exit 0
+              echo \"Attempt \$i: got \$code, retrying in 3s...\"
+              sleep 3
+            done
+            echo 'Health check timed out after 45s' >&2
+            exit 1
+          "
