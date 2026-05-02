@@ -87,8 +87,9 @@ jobs:
 
           cp -r .next/standalone/. "$GITHUB_WORKSPACE/publish/"
 
-          # Prisma schema + migrations needed by migration service
+          # Prisma schema + migrations + config needed by migration service
           [ -d prisma ] && cp -r prisma "$GITHUB_WORKSPACE/publish/"
+          [ -f prisma.config.ts ] && cp prisma.config.ts "$GITHUB_WORKSPACE/publish/"
 
           mkdir -p "$GITHUB_WORKSPACE/publish/deploy"
           cp -r deploy/. "$GITHUB_WORKSPACE/publish/deploy/"

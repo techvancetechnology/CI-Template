@@ -100,8 +100,9 @@ jobs:
           # Standalone runtime (server.js, minimal node_modules, .next/)
           cp -r .next/standalone/. "$GITHUB_WORKSPACE/publish/"
 
-          # Prisma schema + migrations needed by migration service
+          # Prisma schema + migrations + config needed by migration service
           [ -d prisma ] && cp -r prisma "$GITHUB_WORKSPACE/publish/"
+          [ -f prisma.config.ts ] && cp prisma.config.ts "$GITHUB_WORKSPACE/publish/"
 
           # Deploy scripts (backup, wait-for-postgres, etc.) uploaded fresh each time
           mkdir -p "$GITHUB_WORKSPACE/publish/deploy"
