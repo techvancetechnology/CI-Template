@@ -100,6 +100,11 @@ jobs:
           # Standalone runtime (server.js, minimal node_modules, .next/)
           cp -r .next/standalone/. "$GITHUB_WORKSPACE/publish/"
 
+          # Prisma CLI package: standalone excludes devDeps, but prisma.config.ts
+          # imports 'prisma/config' which must be resolvable at runtime on the server.
+          # Copying from node_modules ensures self-contained artifact, no global dep.
+          cp -r node_modules/prisma "$GITHUB_WORKSPACE/publish/node_modules/"
+
           # Prisma schema + migrations + config needed by migration service
           [ -d prisma ] && cp -r prisma "$GITHUB_WORKSPACE/publish/"
           [ -f prisma.config.ts ] && cp prisma.config.ts "$GITHUB_WORKSPACE/publish/"
