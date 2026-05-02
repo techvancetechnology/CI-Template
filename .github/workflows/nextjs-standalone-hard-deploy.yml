@@ -125,7 +125,7 @@ jobs:
         run: |
           ssh github@${{ secrets.VDS_HOST }} "mkdir -p $REMOTE_ROOT"
 
-          rsync -rz \
+          rsync -rlz \
             --no-times \
             --no-perms \
             --no-owner \
