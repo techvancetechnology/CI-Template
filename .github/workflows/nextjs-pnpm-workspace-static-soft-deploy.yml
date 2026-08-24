@@ -1,0 +1,66 @@
+name: Reusable Next.js PNPM Workspace Static Deploy (Soft)
+
+on:
+  workflow_call:
+    inputs:
+      remote_root_path:
+        required: true
+        type: string
+        description: Remote directory served by the static web server.
+      workspace_package:
+        required: true
+        type: string
+        description: Exact PNPM workspace package to build.
+      app_path:
+        required: true
+        type: string
+        description: Workspace-relative application directory containing out/ after build.
+      node_version:
+        required: false
+        type: string
+        default: '22'
+      pnpm_version:
+        required: false
+        type: string
+        default: '11.0.9'
+    secrets:
+      VDS_HOST:
+        required: true
+      VDS_SSH_KEY:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ inputs.pnpm_version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install immutable workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build static workspace target
+        run: |
+          set -euo pipefail
+          pnpm --filter "${{ inputs.workspace_package }}" run build
+          test -d "$GITHUB_WORKSPACE/${{ inputs.app_path }}/out"
+      - name: Configure SSH transport
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -R "${{ secrets.VDS_HOST }}" || true
+          ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts
+      - name: Synchronize static release without remote clean
+        run: |
+          set -euo pipefail
+          ssh "github@${{ secrets.VDS_HOST }}" "mkdir -p '${{ inputs.remote_root_path }}'"
+          rsync -rlz --delete --no-times --no-perms --no-owner --no-group \
+            "$GITHUB_WORKSPACE/${{ inputs.app_path }}/out/" \
+            "github@${{ secrets.VDS_HOST }}:${{ inputs.remote_root_path }}/"

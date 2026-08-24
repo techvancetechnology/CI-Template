@@ -1,0 +1,132 @@
+name: Reusable Next.js PNPM Workspace Standalone Deploy (Hard)
+
+on:
+  workflow_call:
+    inputs:
+      remote_root_path:
+        required: true
+        type: string
+      service_name:
+        required: true
+        type: string
+      health_check_port:
+        required: true
+        type: number
+      health_check_path:
+        required: false
+        type: string
+        default: /
+      workspace_package:
+        required: true
+        type: string
+      workspace_prepare_script:
+        required: false
+        type: string
+        default: ''
+      standalone_dir:
+        required: true
+        type: string
+      standalone_server_path:
+        required: true
+        type: string
+      static_dir:
+        required: true
+        type: string
+      public_dir:
+        required: true
+        type: string
+      runtime_app_path:
+        required: true
+        type: string
+      deploy_dir:
+        required: false
+        type: string
+        default: ''
+      migrate_service_name:
+        required: false
+        type: string
+        default: ''
+      node_version:
+        required: false
+        type: string
+        default: '22'
+      pnpm_version:
+        required: false
+        type: string
+        default: '11.0.9'
+    secrets:
+      VDS_HOST:
+        required: true
+      VDS_SSH_KEY:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ inputs.pnpm_version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install immutable workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare and build standalone workspace target
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.workspace_prepare_script }}" ]; then
+            pnpm run "${{ inputs.workspace_prepare_script }}"
+          fi
+          pnpm --filter "${{ inputs.workspace_package }}" run build
+          test -f "$GITHUB_WORKSPACE/${{ inputs.standalone_server_path }}"
+      - name: Stage standalone artifact
+        run: |
+          set -euo pipefail
+          publish="$GITHUB_WORKSPACE/publish"
+          rm -rf "$publish"
+          mkdir -p "$publish/${{ inputs.runtime_app_path }}/.next"
+          cp -R "$GITHUB_WORKSPACE/${{ inputs.standalone_dir }}/." "$publish/"
+          cp -R "$GITHUB_WORKSPACE/${{ inputs.static_dir }}" "$publish/${{ inputs.runtime_app_path }}/.next/static"
+          cp -R "$GITHUB_WORKSPACE/${{ inputs.public_dir }}" "$publish/${{ inputs.runtime_app_path }}/public"
+          if [ -n "${{ inputs.deploy_dir }}" ]; then
+            mkdir -p "$publish/deploy"
+            cp -R "$GITHUB_WORKSPACE/${{ inputs.deploy_dir }}/." "$publish/deploy/"
+          fi
+      - name: Configure SSH transport
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${{ secrets.VDS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -R "${{ secrets.VDS_HOST }}" || true
+          ssh-keyscan -H "${{ secrets.VDS_HOST }}" >> ~/.ssh/known_hosts
+      - name: Stop service before replacement
+        run: ssh "github@${{ secrets.VDS_HOST }}" "sudo systemctl stop '${{ inputs.service_name }}' || true"
+      - name: Replace standalone artifact
+        run: |
+          set -euo pipefail
+          ssh "github@${{ secrets.VDS_HOST }}" "rm -rf '${{ inputs.remote_root_path }}' && mkdir -p '${{ inputs.remote_root_path }}'"
+          rsync -rlz --no-times --no-perms --no-owner --no-group \
+            "$GITHUB_WORKSPACE/publish/" \
+            "github@${{ secrets.VDS_HOST }}:${{ inputs.remote_root_path }}/"
+      - name: Run explicitly configured migration service
+        if: ${{ inputs.migrate_service_name != '' }}
+        run: ssh "github@${{ secrets.VDS_HOST }}" "sudo systemctl start '${{ inputs.migrate_service_name }}' && sudo systemctl is-active --quiet '${{ inputs.migrate_service_name }}'"
+      - name: Restart service and verify health
+        run: |
+          set -euo pipefail
+          ssh "github@${{ secrets.VDS_HOST }}" '
+            set -e
+            sudo systemctl restart "${{ inputs.service_name }}"
+            sudo systemctl is-active --quiet "${{ inputs.service_name }}"
+            for i in $(seq 1 15); do
+              code=$(curl -fsS -o /dev/null -w "%{http_code}" "http://127.0.0.1:${{ inputs.health_check_port }}${{ inputs.health_check_path }}" 2>/dev/null || echo 000)
+              [ "$code" = 200 ] && exit 0
+              sleep 3
+            done
+            exit 1
+          '
