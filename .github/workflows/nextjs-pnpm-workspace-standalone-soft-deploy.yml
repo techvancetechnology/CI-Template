@@ -38,6 +38,10 @@ on:
       runtime_app_path:
         required: true
         type: string
+      build_id_relative_path:
+        required: false
+        type: string
+        default: ''
       deploy_dir:
         required: false
         type: string
@@ -92,6 +96,11 @@ jobs:
           cp -R "$GITHUB_WORKSPACE/${{ inputs.standalone_dir }}/." "$publish/"
           cp -R "$GITHUB_WORKSPACE/${{ inputs.static_dir }}" "$publish/${{ inputs.runtime_app_path }}/.next/static"
           cp -R "$GITHUB_WORKSPACE/${{ inputs.public_dir }}" "$publish/${{ inputs.runtime_app_path }}/public"
+          if [ -n "${{ inputs.build_id_relative_path }}" ]; then
+            build_id="$publish/${{ inputs.build_id_relative_path }}"
+            mkdir -p "$(dirname "$build_id")"
+            printf '%s\n' "$GITHUB_SHA" > "$build_id"
+          fi
           if [ -n "${{ inputs.deploy_dir }}" ]; then
             mkdir -p "$publish/deploy"
             cp -R "$GITHUB_WORKSPACE/${{ inputs.deploy_dir }}/." "$publish/deploy/"
